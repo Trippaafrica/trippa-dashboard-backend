@@ -314,7 +314,7 @@ export class WalletController {
             userId: business.id,
             phone: '', // Optional for Shopify integration
           },
-          `https://admin.shopify.com/store/${storeName}/apps/nigerian-shipping-v2/app/wallet?status=success`
+          `https://admin.shopify.com/store/${storeName}/apps/trippa/app/wallet?status=success`
         );
       return {
         success: true,
