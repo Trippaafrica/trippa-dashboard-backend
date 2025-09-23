@@ -79,7 +79,7 @@ export class AdminService {
     const { data: adminArr, error: adminError } = await supabase
       .from('admin')
       .select('*')
-      .eq('supabase_user_id', userData.user.id)
+      .or(`supabase_user_id.eq.${userData.user.id},id.eq.${userData.user.id}`)
       .limit(1);
     if (adminError) {
       return { error: adminError.message };

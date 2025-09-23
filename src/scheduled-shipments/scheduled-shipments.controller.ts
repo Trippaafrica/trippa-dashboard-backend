@@ -13,10 +13,24 @@ export class ScheduledShipmentsController {
   ) {
     try {
       // --- AUTHENTICATION BLOCK (copied from OrderController) ---
+      // Unified business lookup: shopdomain, API key, or JWT
       const apiKey = req.headers['x-api-key'];
       const authHeader = req.headers['authorization'];
+      const shopdomain = req.headers['shopdomain'] || createScheduledShipmentDto.shopdomain;
       let businessId: string | undefined;
-      if (apiKey) {
+
+      if (shopdomain) {
+        // Shopify integration: lookup business by shopdomain
+        const { data: business, error } = await require('../auth/supabase.client').supabase
+          .from('business')
+          .select('id')
+          .eq('shopdomain', shopdomain)
+          .single();
+        if (error || !business?.id) {
+          return { success: false, message: 'Invalid shopdomain or business not found' };
+        }
+        businessId = business.id;
+      } else if (apiKey) {
         // API key integration: lookup business by api_key
         const { data: business, error } = await require('../auth/supabase.client').supabase
           .from('business')
@@ -38,14 +52,14 @@ export class ScheduledShipmentsController {
         const { data: business, error } = await require('../auth/supabase.client').supabase
           .from('business')
           .select('id')
-          .eq('supabase_user_id', supabaseUserId)
+          .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
           .single();
         if (error || !business?.id) {
           return { success: false, message: 'Business not found for authenticated user' };
         }
         businessId = business.id;
       } else {
-        return { success: false, message: 'Missing authentication: provide x-api-key or Bearer token' };
+        return { success: false, message: 'Missing authentication: provide shopdomain, x-api-key, or Bearer token' };
       }
 
       // Use trippa_id from orderData if available, fallback to null

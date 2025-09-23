@@ -45,10 +45,10 @@ export class DhlAdapter extends LogisticsProviderAdapter {
     const originCityName = request.pickup.city;
     const destinationCountryCode = request.delivery.countryCode;
     const destinationCityName = request.delivery.city;
-    const weight = request.item.weight;
-    const length = request.item.length ?? 10;
-    const width = request.item.width ?? 10;
-    const height = request.item.height ?? 10;
+  const weight = Number(request.item.weight);
+  const length = Number(request.item.length ?? 10);
+  const width = Number(request.item.width ?? 10);
+  const height = Number(request.item.height ?? 10);
     const plannedShippingDate = new Date(Date.now() + 3600 * 1000).toISOString().split('T')[0];
     const unitOfMeasurement = 'metric';
 
@@ -295,11 +295,11 @@ export class DhlAdapter extends LogisticsProviderAdapter {
         content: {
           packages: [
             {
-              weight: request.item.weight,
+              weight: Number(request.item.weight),
               dimensions: {
-                length: request.item.length ?? 10,
-                width: request.item.width ?? 10,
-                height: request.item.height ?? 10,
+                length: Number(request.item.length) || 10,
+                width: Number(request.item.width) || 10,
+                height: Number(request.item.height) || 10,
               },
             },
           ],
@@ -385,11 +385,11 @@ export class DhlAdapter extends LogisticsProviderAdapter {
           content: {
             packages: [
               {
-                weight: request.item.weight,
+                weight: Number(request.item.weight),
                 dimensions: {
-                  length: request.item.length ?? 30,
-                  width: request.item.width ?? 10,
-                  height: request.item.height ?? 10,
+                  length: Number(request.item.length) || 30,
+                  width: Number(request.item.width) || 10,
+                  height: Number(request.item.height) || 10,
                 },
               },
             ],
@@ -401,11 +401,11 @@ export class DhlAdapter extends LogisticsProviderAdapter {
                     unitOfMeasurement: 'PCS',
                     value: 1,
                   },
-                  price: request.item.value || 15000,
+                  price: Number(request.item.value) || 15000,
                   description: request.item.description,
                   weight: {
-                    netValue: request.item.weight,
-                    grossValue: request.item.weight,
+                    netValue: Number(request.item.weight),
+                    grossValue: Number(request.item.weight),
                   },
                   commodityCodes: [
                     {
@@ -516,11 +516,11 @@ export class DhlAdapter extends LogisticsProviderAdapter {
           content: {
             packages: [
               {
-                weight: request.item.weight,
+                weight: Number(request.item.weight),
                 dimensions: {
-                  length: request.item.length ?? 30,
-                  width: request.item.width ?? 30,
-                  height: request.item.height ?? 30,
+                  length: Number(request.item.length) || 30,
+                  width: Number(request.item.width) || 30,
+                  height: Number(request.item.height) || 30,
                 },
               },
             ],
@@ -532,11 +532,11 @@ export class DhlAdapter extends LogisticsProviderAdapter {
                     unitOfMeasurement: 'PCS',
                     value: 1,
                   },
-                  price: request.item.value || 100000,
-                  description: request.item.description,
+                  price: Number(request.item.value) || 100000,
+                  description: Number(request.item.description),
                   weight: {
-                    netValue: request.item.weight,
-                    grossValue: request.item.weight,
+                    netValue: Number(request.item.weight),
+                    grossValue: Number(request.item.weight),
                   },
                   commodityCodes: [
                     {

@@ -46,29 +46,44 @@ export class WalletController {
       return { balance: wallet.balance };
     }
 
-    // Otherwise, authenticate via API key or JWT token
+    // Otherwise, authenticate via shopdomain, API key, or JWT token
     const apiKey = req?.headers['x-api-key'];
     const authHeader = req?.headers['authorization'];
+    const shopdomain = req?.headers['shopdomain'] || req?.body?.shopdomain;
 
-    if (apiKey) {
+    if (shopdomain) {
+      // Shopify integration: lookup business by shopdomain
+      const { data: business, error } = await supabase
+        .from('business')
+        .select('id, wallet_balance')
+        .eq('shopdomain', shopdomain)
+        .single();
+      if (error || !business?.id) {
+        throw new BadRequestException('Invalid shopdomain or business not found');
+      }
+      // Convert from kobo to Naira for Shopify users
+      const balanceInNaira = (business.wallet_balance || 0) / 100;
+      return {
+        balance: balanceInNaira,
+        currency: 'NGN',
+        businessId: business.id
+      };
+    } else if (apiKey) {
       // API key integration: lookup business by api_key
       const { data: business, error } = await supabase
         .from('business')
         .select('id, wallet_balance')
         .eq('api_key', apiKey)
         .single();
-      
       if (error || !business?.id) {
         throw new BadRequestException('Invalid API key or business not found');
       }
-      
       // Convert from kobo to Naira for API integrators
       const balanceInNaira = (business.wallet_balance || 0) / 100;
-      
-      return { 
+      return {
         balance: balanceInNaira,
         currency: 'NGN',
-        businessId: business.id 
+        businessId: business.id
       };
     } else if (authHeader && authHeader.startsWith('Bearer ')) {
       // Dashboard user: lookup business by supabase_user_id from token
@@ -81,22 +96,20 @@ export class WalletController {
       const { data: business, error } = await supabase
         .from('business')
         .select('id, wallet_balance')
-        .eq('supabase_user_id', supabaseUserId)
+        .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
         .single();
       if (error || !business?.id) {
         throw new BadRequestException('Business not found for authenticated user');
       }
-      
       // Convert from kobo to Naira for dashboard users too
       const balanceInNaira = (business.wallet_balance || 0) / 100;
-      
-      return { 
+      return {
         balance: balanceInNaira,
         currency: 'NGN',
-        businessId: business.id 
+        businessId: business.id
       };
     } else {
-      throw new BadRequestException('Missing authentication: provide userId query param, x-api-key header, or Bearer token');
+      throw new BadRequestException('Missing authentication: provide userId query param, shopdomain, x-api-key header, or Bearer token');
     }
   }
 
@@ -131,7 +144,7 @@ export class WalletController {
       const { data: business, error } = await supabase
         .from('business')
         .select('id')
-        .eq('supabase_user_id', supabaseUserId)
+  .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
         .single();
       if (error || !business?.id) {
         throw new BadRequestException('Business not found for authenticated user');
@@ -270,42 +283,39 @@ export class WalletController {
   // Endpoint for Shopify users to generate Paystack payment link for wallet top-up
   @Post('topup/shopify-link')
   async generateShopifyTopupLink(@Body() body: { 
-    amount: number; 
-    user_email: string; 
-    shop_domain?: string;
-    api_key: string;
-  }) {
-    const { amount, user_email, shop_domain, api_key } = body;
-    
-    if (!amount || !user_email || !api_key) {
-      throw new BadRequestException('Missing required fields: amount, user_email, api_key');
+    amount: number;
+    user_email: string;
+  }, @Req() req) {
+    const { amount, user_email } = body;
+    const shopdomain = req?.headers['shopdomain'];
+    if (!amount || !user_email || !shopdomain) {
+      throw new BadRequestException('Missing required fields: amount (body), user_email (body), shopdomain (header)');
     }
 
-    // Verify API key and get business details
+    // Lookup business by shopdomain
     const { data: business, error } = await supabase
       .from('business')
       .select('id, business_name')
-      .eq('api_key', api_key)
+      .eq('shopdomain', shopdomain)
       .single();
-    
     if (error || !business?.id) {
-      throw new BadRequestException('Invalid API key or business not found');
+      throw new BadRequestException('Business not found for provided shopdomain');
     }
 
-  // Always convert amount from Naira to kobo
-  const amountInKobo = amount * 100;
-    
+    // Always convert amount from Naira to kobo
+    const amountInKobo = amount * 100;
     try {
-      const paymentData = await this.walletService.initiateTopup(
-        amountInKobo,
-        {
-          email: user_email,
-          userId: business.id,
-          phone: '', // Optional for Shopify integration
-        },
-        `${process.env.FRONTEND_URL || 'https://app.trippa.ng'}/wallet/callback?source=shopify&shop=${shop_domain}`
-      );
-      
+        // Extract store name before '.myshopify.com'
+        const storeName = shopdomain.replace(/\.myshopify\.com$/, '');
+        const paymentData = await this.walletService.initiateTopup(
+          amountInKobo,
+          {
+            email: user_email,
+            userId: business.id,
+            phone: '', // Optional for Shopify integration
+          },
+          `https://admin.shopify.com/store/${storeName}/apps/nigerian-shipping-v2/app/wallet?status=success`
+        );
       return {
         success: true,
         payment_url: paymentData.authorization_url,

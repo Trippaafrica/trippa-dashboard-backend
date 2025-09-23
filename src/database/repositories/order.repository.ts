@@ -12,6 +12,7 @@ export interface Order {
   updated_at: string;
   delivery_cost: any;
   order_data: any;
+  shopify_order_id?: string; // Optional Shopify order ID for Shopify Tripper users
 }
 
 @Injectable()

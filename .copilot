@@ -1,0 +1,41 @@
+# GitHub Copilot Instructions for Trippa Backend
+
+## Project Overview
+This is a NestJS backend for Trippa, a logistics aggregator platform.  
+It integrates with multiple shipping providers, handles authentication, and aggregates quotes.
+
+## you should alwasycarefully look into my exiting code from other files to understand how the backend work before implementation and quick error fixes rather always recreating your own solutions and tgere for changing lots of things
+
+## Coding Guidelines
+- Use TypeScript and NestJS conventions.
+- All API endpoints must validate input using DTOs and `class-validator`.
+- Use dependency injection for all services.
+- Handle errors with custom exception filters for consistent API responses.
+<!-- - Document all controllers and DTOs with Swagger decorators. -->
+<!-- - Write unit tests for all services and controllers using Jest. -->
+- Use environment variables for secrets and configuration.
+
+## Folder Structure
+- `src/quotes/` — Quote aggregation logic and endpoints.
+- `src/logistics/` — Provider integrations and types.
+- `src/auth/` — Authentication and Supabase integration.
+- `src/utils/` — Utility services (e.g., geocoding, API stats).
+- `src/business/` — Business entity logic.
+- `src/create-order/` — Order creation endpoints.
+- `src/deliveries/` — Delivery tracking endpoints.
+- `src/disputes/` — Dispute management.
+- `src/notifications/` — Notification logic.
+
+## Copilot Usage
+- Suggest code that follows NestJS best practices.
+- Scaffold new modules, controllers, and services as needed.
+- Generate DTOs and validation decorators for all request bodies.
+- Propose improvements for error handling, documentation, and extensibility.
+- Write sample unit tests for new features.
+- Avoid generating code that exposes secrets or violates security best practices.
+
+## Example Tasks
+<!-- - Add a new shipping provider integration. -->
+- Improve error handling in the quotes controller.
+<!-- - Generate Swagger documentation for all endpoints. -->
+<!-- - Write unit tests for the logistics aggregator service. -->

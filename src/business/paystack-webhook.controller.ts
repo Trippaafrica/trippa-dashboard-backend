@@ -35,19 +35,36 @@ export class PaystackWebhookController {
       // supabaseUserId is inside event.data.customer.metadata.supabaseUserId
       const customer = event.data.customer || {};
       const customerMetadata = customer.metadata || {};
-      const supabaseUserId = customerMetadata.supabaseUserId || customerMetadata.businessId; // fallback for legacy
+      // Try customerMetadata.supabaseUserId, then businessId, then event.data.metadata.userId (for Shopify)
+      let supabaseUserId = customerMetadata.supabaseUserId;
+      let businessId = customerMetadata.businessId || event.data.metadata?.userId;
       const amount = event.data.amount; // Amount in kobo
-      console.log('[Webhook] charge.success event:', { supabaseUserId, amount, customerMetadata });
-      if (supabaseUserId && amount) {
+      console.log('[Webhook] charge.success event:', { supabaseUserId, businessId, amount, customerMetadata });
+      if ((supabaseUserId || businessId) && amount) {
         try {
-          // Fetch current balance
-          const { data: business, error: fetchError } = await supabase
-            .from('business')
-            .select('id, wallet_balance')
-            .eq('supabase_user_id', supabaseUserId)
-            .single();
+          let business;
+          let fetchError;
+          if (supabaseUserId) {
+            // Dashboard user: lookup by supabase_user_id
+            const result = await supabase
+              .from('business')
+              .select('id, wallet_balance')
+              .eq('supabase_user_id', supabaseUserId)
+              .single();
+            business = result.data;
+            fetchError = result.error;
+          } else {
+            // Shopify user: lookup by business id
+            const result = await supabase
+              .from('business')
+              .select('id, wallet_balance')
+              .eq('id', businessId)
+              .single();
+            business = result.data;
+            fetchError = result.error;
+          }
           if (fetchError || !business) {
-            console.error('[Webhook] Business not found:', { supabaseUserId, fetchError });
+            console.error('[Webhook] Business not found:', { supabaseUserId, businessId, fetchError });
             throw new Error('Business not found');
           }
           console.log('[Webhook] Current wallet_balance:', business.wallet_balance);
@@ -66,6 +83,8 @@ export class PaystackWebhookController {
           // Emit websocket event for real-time update
           if (supabaseUserId) {
             this.walletGateway.sendWalletUpdate(supabaseUserId, newBalance);
+          } else if (businessId) {
+            this.walletGateway.sendWalletUpdate(businessId, newBalance);
           }
 
           // Insert transaction record

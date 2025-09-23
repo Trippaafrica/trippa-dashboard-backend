@@ -17,12 +17,24 @@ export class CreateOrderController {
     if (!body.partnerId) {
       throw new BadRequestException('partnerId is required for order creation');
     }
-    // Industry-standard business lookup
+    // Unified business lookup: shopdomain (header only), API key, or JWT
     let businessId: string | undefined;
     const apiKey = req.headers['x-api-key'];
     const authHeader = req.headers['authorization'];
+    const shopdomain = req.headers['shopdomain'];
 
-    if (apiKey) {
+    if (shopdomain) {
+      // Shopify integration: lookup business by shopdomain (header only)
+      const { data: business, error } = await supabase
+        .from('business')
+        .select('id')
+        .eq('shopdomain', shopdomain)
+        .single();
+      if (error || !business?.id) {
+        throw new BadRequestException('Invalid shopdomain or business not found');
+      }
+      businessId = business.id;
+    } else if (apiKey) {
       // API key integration: lookup business by api_key
       const { data: business, error } = await supabase
         .from('business')
@@ -51,7 +63,7 @@ export class CreateOrderController {
       }
       businessId = business.id;
     } else {
-      throw new BadRequestException('Missing authentication: provide x-api-key or Bearer token');
+      throw new BadRequestException('Missing authentication: provide shopdomain (header), x-api-key, or Bearer token');
     }
     return this.createOrderService.createOrder(body, businessId);
   }

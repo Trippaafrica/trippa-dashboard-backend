@@ -1,3 +1,14 @@
+// Core types and interfaces for the logistics aggregator
+
+export interface CreateOrderDto {
+  partner: string; // e.g. 'glovo', 'faramove', etc.
+  partnerId?: string; // Partner ID from database or quote response (unified field)
+  request: any; // Should match UnifiedQuoteRequest type
+  order_id?: string; // Pass trippa id from scheduled shipment if available
+  shopdomain?: string; // Optional for Shopify authentication
+  shopifyOrderId?: string; // Optional Shopify order ID for Shopify Tripper users
+  // ...other fields...
+}
 export interface CreateOrderDto {
   partner: string; // e.g. 'glovo', 'faramove', etc.
   partnerId?: string; // Partner ID from database or quote response (unified field)

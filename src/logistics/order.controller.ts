@@ -244,9 +244,11 @@ export class OrderController {
     // --- AUTHENTICATION BLOCK (same pattern as tracking endpoint) ---
     const apiKey = req.headers['x-api-key'];
     const authHeader = req.headers['authorization'];
+    const shopdomain = req.headers['shopdomain'];
     let businessId: string | undefined;
     let isApiKeyAuth = false;
-    
+    let isShopifyAuth = false;
+
     if (apiKey) {
       // API key integration: lookup business by api_key
       const { data: business, error } = await supabase
@@ -254,12 +256,23 @@ export class OrderController {
         .select('id')
         .eq('api_key', apiKey)
         .single();
-      
       if (error || !business?.id) {
         throw new BadRequestException('Invalid API key or business not found');
       }
       businessId = business.id;
       isApiKeyAuth = true;
+    } else if (shopdomain) {
+      // Shopify integration: lookup business by shopdomain
+      const { data: business, error } = await supabase
+        .from('business')
+        .select('id')
+        .eq('shopdomain', shopdomain)
+        .single();
+      if (error || !business?.id) {
+        throw new BadRequestException('Invalid shopdomain or business not found');
+      }
+      businessId = business.id;
+      isShopifyAuth = true;
     } else if (authHeader && authHeader.startsWith('Bearer ')) {
       // Dashboard user: lookup business by supabase_user_id from token
       const token = authHeader.replace('Bearer ', '');
@@ -271,7 +284,7 @@ export class OrderController {
       const { data: business, error } = await supabase
         .from('business')
         .select('id')
-        .eq('supabase_user_id', supabaseUserId)
+        .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
         .single();
       if (error || !business?.id) {
         throw new NotFoundException('Business not found for authenticated user');
@@ -279,18 +292,18 @@ export class OrderController {
       businessId = business.id;
       isApiKeyAuth = false;
     } else {
-      throw new NotFoundException('Missing authentication: provide x-api-key or Bearer token');
+      throw new NotFoundException('Missing authentication: provide x-api-key, shopdomain, or Bearer token');
     }
     // --- END AUTHENTICATION BLOCK ---
 
     // Get the order and verify it belongs to the authenticated business
-    const { data: order, error } = await supabase
+    let { data: order, error } = await supabase
       .from('order')
       .select('*')
       .eq('id', id)
-      .eq('business_id', businessId) // Ensure user can only access their own orders
+      .eq('business_id', businessId)
       .single();
-    
+
     if (error || !order) {
       // Try by order_id as fallback (for custom order IDs)
       const { data: orderByOrderId, error: orderIdError } = await supabase
@@ -299,15 +312,54 @@ export class OrderController {
         .eq('order_id', id)
         .eq('business_id', businessId)
         .single();
-      
+
       if (orderIdError || !orderByOrderId) {
-        throw new NotFoundException('Order not found or access denied');
+        // Try by shopify_order_id for Shopify users
+        if (isShopifyAuth) {
+          const { data: orderByShopifyId, error: shopifyIdError } = await supabase
+            .from('order')
+            .select('*')
+            .eq('shopify_order_id', id)
+            .eq('business_id', businessId)
+            .single();
+          if (shopifyIdError || !orderByShopifyId) {
+            throw new NotFoundException('Order not found or access denied');
+          }
+          order = orderByShopifyId;
+        } else {
+          throw new NotFoundException('Order not found or access denied');
+        }
+      } else {
+        order = orderByOrderId;
       }
-      
-      // Filter sensitive data for API key users
-      return isApiKeyAuth ? this.filterOrderForApiKey(orderByOrderId) : orderByOrderId;
     }
-    
+
+    // --- STATUS SYNC LOGIC ---
+    // Only sync if order has a partner/provider and partner_response
+    try {
+      const partnerName = (order.partner || order.provider || (order.partner_response && order.partner_response.partner))?.toLowerCase();
+      const partnerOrderId = order.partner_response?.orderId || order.partner_response?.trackingNumber || order.order_id;
+      if (partnerName && partnerOrderId) {
+        // Get the correct adapter from LogisticsPartnerService
+        // You may need to inject LogisticsPartnerService in the constructor
+        const adapter = this["logisticsPartnerService"]?.getAdapterByName?.(partnerName);
+        if (adapter && typeof adapter.trackOrder === "function") {
+          const tracking = await adapter.trackOrder(partnerOrderId);
+          if (tracking?.status && tracking.status !== order.status) {
+            // Update status in DB
+            await supabase
+              .from('order')
+              .update({ status: tracking.status })
+              .eq('id', order.id);
+            order.status = tracking.status;
+          }
+        }
+      }
+    } catch (syncErr) {
+      // Log but do not block response
+      console.error('[OrderController] Failed to sync order status:', syncErr);
+    }
+
     // Filter sensitive data for API key users
     return isApiKeyAuth ? this.filterOrderForApiKey(order) : order;
   }

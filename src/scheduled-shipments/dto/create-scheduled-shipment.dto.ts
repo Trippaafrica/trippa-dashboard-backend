@@ -4,4 +4,5 @@ export class CreateScheduledShipmentDto {
   request: any; // Same as CreateOrderDto.request
   scheduledDate?: string; // Only present for scheduled shipments
   quote?: { price: number }; // Selected quote for cost calculation
+  shopdomain?: string; // Optional for Shopify authentication
 }

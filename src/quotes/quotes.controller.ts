@@ -30,41 +30,55 @@ export class QuotesController {
     let businessId: string | undefined;
     const apiKey = req.headers['x-api-key'];
     const authHeader = req.headers['authorization'];
+      const shopdomain = req.headers['shopdomain'];
 
-    if (apiKey) {
-      // API key integration: lookup business by api_key
-      const { data: business, error } = await supabase
-        .from('business')
-        .select('id')
-        .eq('api_key', apiKey)
-        .single();
-      // Logging for debugging
-      this.logger.logApiAuth(`API key authentication`, { apiKey: apiKey?.substring(0, 10) + '...', businessFound: !!business?.id });
-      if (error || !business?.id) {
-        this.logger.error('Invalid API key or business not found', error);
-        throw new BadRequestException('Invalid API key or business not found');
+      if (apiKey) {
+        // API key integration: lookup business by api_key
+        const { data: business, error } = await supabase
+          .from('business')
+          .select('id')
+          .eq('api_key', apiKey)
+          .single();
+        // Logging for debugging
+        this.logger.logApiAuth(`API key authentication`, { apiKey: apiKey?.substring(0, 10) + '...', businessFound: !!business?.id });
+        if (error || !business?.id) {
+          this.logger.error('Invalid API key or business not found', error);
+          throw new BadRequestException('Invalid API key or business not found');
+        }
+        businessId = business.id;
+      } else if (shopdomain) {
+        // Shopify integration: lookup business by shopdomain
+        const { data: business, error } = await supabase
+          .from('business')
+          .select('id')
+          .eq('shopdomain', shopdomain)
+          .single();
+        this.logger.logApiAuth(`Shopify authentication`, { shopdomain, businessFound: !!business?.id });
+        if (error || !business?.id) {
+          this.logger.error('Invalid shopdomain or business not found', error);
+          throw new BadRequestException('Invalid shopdomain or business not found');
+        }
+        businessId = business.id;
+      } else if (authHeader && authHeader.startsWith('Bearer ')) {
+        // Dashboard user: lookup business by supabase_user_id from token
+        const token = authHeader.replace('Bearer ', '');
+        const { data: userData, error: userError } = await supabase.auth.getUser(token);
+        if (userError || !userData?.user?.id) {
+          throw new BadRequestException('Invalid or expired token');
+        }
+        const supabaseUserId = userData.user.id;
+        const { data: business, error } = await supabase
+          .from('business')
+          .select('id')
+          .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
+          .single();
+        if (error || !business?.id) {
+          throw new BadRequestException('Business not found for authenticated user');
+        }
+        businessId = business.id;
+      } else {
+        throw new BadRequestException('Missing authentication: provide x-api-key, shopdomain, or Bearer token');
       }
-      businessId = business.id;
-    } else if (authHeader && authHeader.startsWith('Bearer ')) {
-      // Dashboard user: lookup business by supabase_user_id from token
-      const token = authHeader.replace('Bearer ', '');
-      const { data: userData, error: userError } = await supabase.auth.getUser(token);
-      if (userError || !userData?.user?.id) {
-        throw new BadRequestException('Invalid or expired token');
-      }
-      const supabaseUserId = userData.user.id;
-      const { data: business, error } = await supabase
-        .from('business')
-        .select('id')
-        .eq('supabase_user_id', supabaseUserId)
-        .single();
-      if (error || !business?.id) {
-        throw new BadRequestException('Business not found for authenticated user');
-      }
-      businessId = business.id;
-    } else {
-      throw new BadRequestException('Missing authentication: provide x-api-key or Bearer token');
-    }
     // Inject businessId into meta
     request.meta = { ...(request.meta || {}), businessId };
 

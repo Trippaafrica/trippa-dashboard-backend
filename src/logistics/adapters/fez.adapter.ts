@@ -99,16 +99,19 @@ export class FezAdapter extends LogisticsProviderAdapter {
       'secret-key': auth.secretKey,
     };
     // Prepare cost request
+    // Map Abuja to FCT for Fez
+    const fezDeliveryState = request.delivery.state?.trim().toLowerCase() === 'abuja' ? 'FCT' : request.delivery.state;
+    const fezPickupState = request.pickup.state?.trim().toLowerCase() === 'abuja' ? 'FCT' : request.pickup.state;
     const costBody = {
-      state: request.delivery.state,
-      pickUpState: request.pickup.state,
+      state: fezDeliveryState,
+  pickUpState: fezPickupState,
       weight: request.item.weight,
     };
     // Prepare time estimate request
     const timeBody = {
       delivery_type: 'local',
-      pick_up_state: request.pickup.state,
-      drop_off_state: request.delivery.state,
+      pick_up_state: fezPickupState,
+      drop_off_state: fezDeliveryState,
     };
     try {
       console.log('FezAdapter: Sending cost request to', fezCostUrl, 'with body:', costBody);
@@ -155,9 +158,12 @@ export class FezAdapter extends LogisticsProviderAdapter {
       'secret-key': auth.secretKey,
     };
     const batchId = `batch_${Date.now()}`;
+    // Map Abuja to FCT for Fez
+    const fezDeliveryState = request.delivery.state?.trim().toLowerCase() === 'abuja' ? 'FCT' : request.delivery.state;
+    const fezPickupState = request.pickup.state?.trim().toLowerCase() === 'abuja' ? 'FCT' : request.pickup.state;
     const orderBody = [{
       recipientAddress: request.delivery.address,
-      recipientState: request.delivery.state,
+      recipientState: fezDeliveryState,
       recipientName: request.delivery.customerName,
       recipientPhone: request.delivery.customerPhone,
       recipientEmail: (request as any).recipientEmail || '',
@@ -166,7 +172,7 @@ export class FezAdapter extends LogisticsProviderAdapter {
       itemDescription: request.item.description,
       valueOfItem: request.item.value?.toString() || '',
       weight: request.item.weight,
-      pickUpState: request.pickup.state,
+      pickUpState: fezPickupState,
       pickUpAddress: request.pickup.address,
     }];
     

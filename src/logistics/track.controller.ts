@@ -21,15 +21,32 @@ export class TrackController {
     // --- AUTHENTICATION BLOCK ---
     const apiKey = req.headers['x-api-key'];
     const authHeader = req.headers['authorization'];
+    const shopdomain = req.headers['shopdomain'];
     let businessId: string | undefined;
-    if (apiKey) {
+
+    if (shopdomain) {
+      // Shopify integration: lookup business by shopdomain
+      const { data: business, error } = await supabase
+        .from('business')
+        .select('id')
+        .eq('shopdomain', shopdomain)
+        .single();
+      this.logger.logApiAuth('Shopify authentication for tracking', {
+        shopdomain,
+        businessFound: !!business?.id
+      });
+      if (error || !business?.id) {
+        this.logger.error('Invalid shopdomain or business not found', error);
+        throw new NotFoundException('Invalid shopdomain or business not found');
+      }
+      businessId = business.id;
+    } else if (apiKey) {
       // API key integration: lookup business by api_key
       const { data: business, error } = await supabase
         .from('business')
         .select('id')
         .eq('api_key', apiKey)
         .single();
-      // Logging for debugging
       this.logger.logApiAuth('API key authentication for tracking', { 
         apiKey: apiKey?.substring(0, 10) + '...', 
         businessFound: !!business?.id 
@@ -57,27 +74,41 @@ export class TrackController {
       }
       businessId = business.id;
     } else {
-      throw new NotFoundException('Missing authentication: provide x-api-key or Bearer token');
+      throw new NotFoundException('Missing authentication: provide shopdomain, x-api-key, or Bearer token');
     }
     // --- END AUTHENTICATION BLOCK ---
 
     // 1. Lookup the order in the DB (robust string match for order_id)
     let { data: order, error } = await supabase
       .from('order')
-      .select('id, order_id, partner_id, partner_response')
+      .select('id, order_id, shopify_order_id, partner_id, partner_response')
       .eq('order_id', orderId)
       .single();
     if (error || !order) {
       // fallback: try by UUID id
       const fallback = await supabase
         .from('order')
-        .select('id, order_id, partner_id, partner_response')
+        .select('id, order_id, shopify_order_id, partner_id, partner_response')
         .eq('id', orderId)
         .single();
       order = fallback.data;
       if (fallback.error || !order) {
-        console.error('[Backend] Order not found for orderId:', orderId, '| error:', error, fallback.error);
-        throw new NotFoundException('Order not found');
+        // Try by shopify_order_id for Shopify users
+        if (shopdomain) {
+          const shopifyOrder = await supabase
+            .from('order')
+            .select('id, order_id, shopify_order_id, partner_id, partner_response')
+            .eq('shopify_order_id', orderId)
+            .single();
+          order = shopifyOrder.data;
+          if (shopifyOrder.error || !order) {
+            console.error('[Backend] Order not found for shopify_order_id:', orderId, '| error:', error, fallback.error, shopifyOrder.error);
+            throw new NotFoundException('Order not found');
+          }
+        } else {
+          console.error('[Backend] Order not found for orderId:', orderId, '| error:', error, fallback.error);
+          throw new NotFoundException('Order not found');
+        }
       }
     }
     // 2. Lookup the partner name

@@ -10,4 +10,9 @@ export class ShopifyAuthController {
     // body should contain: shopify_access_token, business_name, email, phone
     return await this.shopifyAuthService.handleShopifyCallback(body);
   }
+    @Post('register')
+    async shopifyRegister(@Body() body: any) {
+      // body should contain: shopify_access_token, business_name, email, phone, supabase_user_id
+      return await this.shopifyAuthService.handleShopifyRegister(body);
+    }
 }

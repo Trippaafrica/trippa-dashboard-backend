@@ -313,6 +313,7 @@ export class LogisticsPartnerService implements OnModuleInit {
         status: orderResult?.status || 'pending',
         created_at: new Date().toISOString(),
         order_id: customOrderId,
+        shopify_order_id: body.shopifyOrderId || null, // Optional Shopify order ID
       };
 
       const { data: inserted, error: insertError } = await supabase

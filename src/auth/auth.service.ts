@@ -91,7 +91,7 @@ export class AuthService {
       let { data: businessArr } = await supabase
         .from('business')
         .select('*')
-        .eq('supabase_user_id', supabaseUserId)
+  .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
         .limit(1);
       business = businessArr && businessArr.length > 0 ? businessArr[0] : null;
       if (!business) {
@@ -145,7 +145,7 @@ export class AuthService {
         await supabase
           .from('business')
           .update(updateFields)
-          .eq('supabase_user_id', supabaseUserId);
+          .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`);
       }
     }
     // 3. Return Supabase access token as JWT
