@@ -15,13 +15,10 @@ async function bootstrap() {
     app.setGlobalPrefix('api/v1');
     app.enableCors({
         origin: ['http://localhost:3000',
-            'https://www.dashboard.trippaafrica.com',
-            'www.dashboard.trippaafrica.com',
             'http://localhost:3001',
             'https://localhost:3000',
             'https://localhost:3001',
-            'https://trippa-dashboard.netlify.app',
-            'https://dashboard.trippaafrica.com',
+            'https://trippa-dashboard-test.netlify.app'
         ],
         credentials: true,
     });

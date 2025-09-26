@@ -82,16 +82,20 @@ export class QuotesController {
     // Inject businessId into meta
     request.meta = { ...(request.meta || {}), businessId };
 
-    // Fetch wallet balance for business
-    const { data: businessWallet, error: walletError } = await supabase
-      .from('business')
-      .select('wallet_balance')
-      .eq('id', businessId)
-      .single();
-    if (walletError || !businessWallet) {
-      throw new BadRequestException('Could not fetch wallet balance for business');
+    // Only filter by wallet balance for Shopify users
+    let walletBalance: number | undefined = undefined;
+    if (shopdomain) {
+      // Fetch wallet balance for business
+      const { data: businessWallet, error: walletError } = await supabase
+        .from('business')
+        .select('wallet_balance')
+        .eq('id', businessId)
+        .single();
+      if (walletError || !businessWallet) {
+        throw new BadRequestException('Could not fetch wallet balance for business');
+      }
+      walletBalance = Number(businessWallet.wallet_balance || 0);
     }
-    const walletBalance = Number(businessWallet.wallet_balance || 0);
 
     // Debug log for isDocument
     if (request?.item?.isDocument !== undefined) {
@@ -99,7 +103,7 @@ export class QuotesController {
     }
 
     const requestWithCoords = await this.geocodeService.addCoordinatesToRequest(request);
-    // Pass walletBalance to aggregator
+    // Pass walletBalance to aggregator (only set for Shopify users)
     return this.aggregator.getQuotes(requestWithCoords, walletBalance);
   }
 }
