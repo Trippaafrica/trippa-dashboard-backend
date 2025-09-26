@@ -36,7 +36,8 @@ export class PaystackWebhookController {
   const metadata = event.data.metadata || {};
   let supabaseUserId = metadata.supabaseUserId;
   let businessId = metadata.businessId || metadata.userId;
-  const amount = event.data.amount; // Amount in kobo
+        // Use desired_amount from metadata for wallet credit
+        const amount = metadata.desired_amount || event.data.amount; // Amount to credit in kobo
   console.log('[Webhook] charge.success event:', { supabaseUserId, businessId, amount, metadata });
   if ((supabaseUserId || businessId) && amount) {
         try {
