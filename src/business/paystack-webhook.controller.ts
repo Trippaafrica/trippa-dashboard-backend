@@ -42,21 +42,22 @@ export class PaystackWebhookController {
         try {
           let business;
           let fetchError;
-          if (supabaseUserId) {
-            // Dashboard user: lookup by supabase_user_id
-            const result = await supabase
-              .from('business')
-              .select('id, wallet_balance')
-              .eq('supabase_user_id', supabaseUserId)
-              .single();
-            business = result.data;
-            fetchError = result.error;
-          } else {
-            // Shopify user: lookup by business id
+          // First, try businessId
+          if (businessId) {
             const result = await supabase
               .from('business')
               .select('id, wallet_balance')
               .eq('id', businessId)
+              .single();
+            business = result.data;
+            fetchError = result.error;
+          }
+          // If not found, try supabaseUserId
+          if ((!business || fetchError) && supabaseUserId) {
+            const result = await supabase
+              .from('business')
+              .select('id, wallet_balance')
+              .eq('supabase_user_id', supabaseUserId)
               .single();
             business = result.data;
             fetchError = result.error;
