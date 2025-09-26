@@ -32,15 +32,13 @@ export class PaystackWebhookController {
     const event = req.body;
     this.logger.logWebhook('Event received', { event: event.event });
     if (event.event === 'charge.success') {
-      // supabaseUserId is inside event.data.customer.metadata.supabaseUserId
-      const customer = event.data.customer || {};
-      const customerMetadata = customer.metadata || {};
-      // Try customerMetadata.supabaseUserId, then businessId, then event.data.metadata.userId (for Shopify)
-      let supabaseUserId = customerMetadata.supabaseUserId;
-      let businessId = customerMetadata.businessId || event.data.metadata?.userId;
-      const amount = event.data.amount; // Amount in kobo
-      console.log('[Webhook] charge.success event:', { supabaseUserId, businessId, amount, customerMetadata });
-      if ((supabaseUserId || businessId) && amount) {
+  // supabaseUserId and businessId are inside event.data.metadata
+  const metadata = event.data.metadata || {};
+  let supabaseUserId = metadata.supabaseUserId;
+  let businessId = metadata.businessId || metadata.userId;
+  const amount = event.data.amount; // Amount in kobo
+  console.log('[Webhook] charge.success event:', { supabaseUserId, businessId, amount, metadata });
+  if ((supabaseUserId || businessId) && amount) {
         try {
           let business;
           let fetchError;
