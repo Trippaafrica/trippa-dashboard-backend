@@ -18,7 +18,8 @@ async function bootstrap() {
             'http://localhost:3001',
             'https://localhost:3000',
             'https://localhost:3001',
-            'https://trippa-dashboard-test.netlify.app'
+            'https://trippa-dashboard.netlify.app',
+            'https://www.dashboard.trippaafrica.com'
         ],
         credentials: true,
     });
