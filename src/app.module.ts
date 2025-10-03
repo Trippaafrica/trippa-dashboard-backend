@@ -16,11 +16,14 @@ import { HealthModule } from './health/health.module';
 
 import { ShopifyAuthModule } from './shopify-auth/shopify-auth.module';
 
+import { GlovoWebhookModule } from './gateways/glovo-webhook.module';
+
 import { ApiStatsService } from './utils/api-stats.service';
 import { ApiStatsController } from './utils/api-stats.controller';
 import { ProviderRateLimiterService } from './utils/provider-rate-limiter.service';
 import { RateLimiterController } from './utils/rate-limiter.controller';
 import { TableUpdatesGateway } from './gateways/table-updates.gateway';
+import { LogisticsModule } from './logistics/logistics.module';
 
 @Module({
   imports: [
@@ -47,6 +50,8 @@ import { TableUpdatesGateway } from './gateways/table-updates.gateway';
     NotificationsModule,
     HealthModule
   ,ShopifyAuthModule
+  ,GlovoWebhookModule
+  ,LogisticsModule
   ],
   controllers: [ApiStatsController, RateLimiterController],
   providers: [ApiStatsService, ProviderRateLimiterService, TableUpdatesGateway],

@@ -2,12 +2,18 @@ import { Controller, Get, Param, NotFoundException, Req } from '@nestjs/common';
 import { LogisticsPartnerService } from './logistics-partner.service';
 import { supabase } from '../auth/supabase.client';
 import { AppLogger } from '../utils/logger.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { TableUpdatesGateway } from '../gateways/table-updates.gateway';
 
 @Controller('logistics/track')
 export class TrackController {
   private readonly logger = new AppLogger(TrackController.name);
 
-  constructor(private readonly partnerService: LogisticsPartnerService) {}
+  constructor(
+    private readonly partnerService: LogisticsPartnerService,
+    private readonly notificationsGateway: NotificationsGateway,
+    private readonly tableUpdatesGateway: TableUpdatesGateway,
+  ) {}
 
   /**
    * Unified endpoint to track an order by its order_id (UUID or display ID)
@@ -137,6 +143,43 @@ export class TrackController {
     this.logger.logTracking('Routing to partner', { partnerName, providerOrderId });
     // 5. Call the adapter's trackOrder
     const tracking = await adapter.trackOrder(providerOrderId);
+
+    // Persist latest provider status to DB and emit updates
+    try {
+      const latestStatus = tracking?.status || tracking?.meta?.order?.orderStatus || 'Unknown';
+      if (latestStatus && order?.id) {
+        const updateResp = await supabase
+          .from('order')
+          .update({ status: latestStatus })
+          .eq('id', order.id)
+          .select('id, order_id, status');
+
+        if (!updateResp.error) {
+          const updated = (updateResp.data as any[]) || [];
+          if (updated.length) {
+            const localOrderId = updated[0].order_id || updated[0].id;
+            try {
+              this.notificationsGateway.sendOrderStatusUpdate(String(localOrderId), latestStatus);
+            } catch (e) {
+              this.logger.error('Failed to emit order status update via websocket', e);
+            }
+            try {
+              this.tableUpdatesGateway.broadcastTableUpdate('order', {
+                orderNumbers: [localOrderId],
+                status: latestStatus,
+              });
+            } catch (e2) {
+              this.logger.error('Failed to broadcast table update', e2);
+            }
+          }
+        } else {
+          this.logger.error('Failed to persist tracking status to DB', updateResp.error);
+        }
+      }
+    } catch (persistErr) {
+      this.logger.error('Error while persisting tracking status', persistErr);
+    }
+
     return tracking;
   }
 }

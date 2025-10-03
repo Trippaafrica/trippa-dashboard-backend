@@ -109,6 +109,9 @@ export class GlovoAdapter extends LogisticsProviderAdapter {
   }
 
   async createOrder(quoteId: string, request: UnifiedQuoteRequest): Promise<OrderResponse> {
+    // NOTE: We are deprecating quote-based creation and always using direct parcel creation.
+    // The quoteId parameter is ignored for Glovo now.
+
     // Check rate limit before proceeding
     const isAllowed = await this.rateLimiter.checkRateLimit('glovo');
     if (!isAllowed) {
@@ -118,51 +121,104 @@ export class GlovoAdapter extends LogisticsProviderAdapter {
 
     try {
       const token = await this.getToken();
-      const url = `${this.glovoBaseUrl}/v2/laas/quotes/${quoteId}/parcels`;
-      
-      // Wait for rate limit before making request
+      const url = `${this.glovoBaseUrl}/v2/laas/parcels`;
+
+      // Wait for pacing (ensures spacing even if still under hard limit)
       await this.rateLimiter.waitForRateLimit('glovo');
-      
-      // Map unified request to Glovo create order from quote
-      const body = {
+
+      // Pickup mapping: Prefer addressBookId if supplied, else raw address & coords
+      const addressBookId = request.meta?.glovoAddressBookId;
+      const pickupCoordinates = request.pickup.coordinates
+        ? { latitude: request.pickup.coordinates[0], longitude: request.pickup.coordinates[1] }
+        : undefined;
+
+      const deliveryCoordinates = request.delivery.coordinates
+        ? { latitude: request.delivery.coordinates[0], longitude: request.delivery.coordinates[1] }
+        : undefined;
+
+      // Basic validation (lightweight – rely on provider for deep validation)
+      const validationErrors: string[] = [];
+      if (!request.delivery.customerName) validationErrors.push('delivery.customerName missing');
+      if (!request.delivery.customerPhone) validationErrors.push('delivery.customerPhone missing');
+      if (!request.item?.description) validationErrors.push('item.description missing');
+      if (typeof request.item?.weight !== 'number' || request.item.weight <= 0) validationErrors.push('item.weight invalid');
+      if (!addressBookId && !request.pickup.address) validationErrors.push('pickup address or addressBookId required');
+      if (!request.delivery.address) validationErrors.push('delivery.address missing');
+      if (validationErrors.length) {
+        throw new Error('Validation failed: ' + validationErrors.join('; '));
+      }
+
+      // Construct direct parcel creation body (fields inferred from docs / existing quote mapping)
+      const body: any = {
+        pickupDetails: addressBookId
+          ? { addressBook: { id: addressBookId } }
+          : {
+              rawAddress: (request as any).pickup?.formattedAddress || request.pickup.address,
+              coordinates: pickupCoordinates,
+            },
+        deliveryAddress: {
+          rawAddress: (request as any).delivery?.formattedAddress || request.delivery.address,
+          coordinates: deliveryCoordinates,
+          details: (request as any).deliveryDetails || '',
+        },
         contact: {
-          email: (request as any).recipientEmail || '',
           name: request.delivery.customerName,
           phone: request.delivery.customerPhone,
+          email: (request as any).recipientEmail || '',
         },
         packageDetails: {
           contentType: 'GENERIC_PARCEL',
           description: request.item.description,
           parcelValue: request.item.value || 0,
           weight: request.item.weight,
+          // Optional dimensions if provided
+          ...(request.item.length && request.item.width && request.item.height
+            ? {
+                dimensions: {
+                  length: request.item.length,
+                  width: request.item.width,
+                  height: request.item.height,
+                },
+              }
+            : {}),
         },
-        price: {
-          paymentType: 'PAID',
-          delivery: { currencyCode: 'NGN', value: 0 }, // Set actual value if available
-          parcel: { currencyCode: 'NGN', value: 0 },
-        },
-        deliveryAddress: {
-          details: (request as any).deliveryDetails || '',
-        },
-        // Add more fields as needed
+        // Optional payment object / constraints could be added here; Glovo may infer pricing on creation
+        // externalReference: could add custom internal ID if needed
       };
-      const headers = { Authorization: `Bearer ${token}` };
-      console.log('[GlovoAdapter][createOrder] URL:', url);
-      console.log('[GlovoAdapter][createOrder] Payload:', JSON.stringify(body, null, 2));
+
+      // Idempotency key: stable within a short window to avoid duplicate orders on retries
+      const idempotencyKey = `glovo-${request.delivery.customerPhone}-${Date.now().toString(36)}`;
+
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': idempotencyKey,
+      };
+
+      this.logger.logAdapter('glovo', 'createOrder (direct) URL', url);
+      this.logger.logAdapter('glovo', 'createOrder (direct) payload', {
+        ...body,
+        contact: { // Masked for logs
+          name: body.contact?.name,
+          phone: body.contact?.phone?.replace(/.(?=.{4})/g, '*'),
+          email: body.contact?.email ? body.contact.email.replace(/(.).+(@.*)/, '$1***$2') : undefined,
+        },
+      });
+
       const resp = await firstValueFrom(this.httpService.post(url, body, { headers }));
       const data = resp.data;
-      console.log('[GlovoAdapter][createOrder] Response:', JSON.stringify(data, null, 2));
+      this.logger.logAdapter('glovo', 'createOrder (direct) response', data);
+
       return {
         provider: 'glovo',
         orderId: data.trackingNumber?.toString() || data.orderCode || '',
         trackingNumber: data.trackingNumber?.toString() || '',
-        status: data.status?.state || 'Pending',
+        status: data.status?.state || data.state || 'Pending',
       };
     } catch (error) {
       if (error?.response) {
-        console.error('[GlovoAdapter][createOrder] Glovo API error:', error.response.data);
+        this.logger.error('[GlovoAdapter][createOrder] Glovo API error', error.response.data);
       } else {
-        console.error('[GlovoAdapter][createOrder] Error:', error.message);
+        this.logger.error('[GlovoAdapter][createOrder] Error', error.message);
       }
       throw new Error('Glovo createOrder failed: ' + (error?.response?.data?.message || error.message));
     }
