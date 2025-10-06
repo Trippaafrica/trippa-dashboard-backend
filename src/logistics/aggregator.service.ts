@@ -8,6 +8,7 @@ import { MARKUP_FEE } from './constants';
 import { DhlAdapter } from './adapters/dhl/dhl.adapter';
 import { getActiveLogisticsPartners } from './active-partners.util';
 import { AppLogger } from '../utils/logger.service';
+import { GlovoAddressBookService } from './adapters/glovo.addressbook';
 
 @Injectable()
 export class LogisticsAggregatorService {
@@ -19,6 +20,7 @@ export class LogisticsAggregatorService {
     private glovo: GlovoAdapter,
     private gig: GigAdapter,
     private dhl: DhlAdapter,
+    private glovoAddressBookService: GlovoAddressBookService,
   ) {}
 
   async getQuotes(request: UnifiedQuoteRequest, walletBalance?: number): Promise<ProviderQuote[]> {
@@ -27,30 +29,19 @@ export class LogisticsAggregatorService {
     const pickupState = request.pickup.state?.trim().toLowerCase();
     const deliveryState = request.delivery.state?.trim().toLowerCase();
 
-    // Inject glovo_address_book_id into meta if Glovo is a candidate
+    // Compute a reusable global Glovo addressBookId for pickup if Glovo is a candidate
     let glovoAddressBookId: string | undefined = undefined;
     let geocodedDelivery: { formattedAddress?: string, coordinates?: [number, number] } = {};
     if (pickupState === 'lagos' && deliveryState === 'lagos') {
-      // Use businessId from request.meta.businessId
-      const businessId = request.meta?.businessId;
-      if (businessId) {
-        try {
-          const { data: business, error } = await (await import('../auth/supabase.client')).supabase
-            .from('business')
-            .select('glovo_address_book_id')
-            .eq('id', businessId)
-            .single();
-          if (!error && business?.glovo_address_book_id) {
-            glovoAddressBookId = business.glovo_address_book_id;
-            this.logger.logAggregator('Injecting glovo_address_book_id for Glovo', { glovoAddressBookId });
-          } else {
-            this.logger.warn(`No glovo_address_book_id found for businessId: ${businessId}`);
-          }
-        } catch (err) {
-          this.logger.error('Error fetching business for Glovo address book ID', err);
+      try {
+        if (request.pickup?.address) {
+          glovoAddressBookId = await this.glovoAddressBookService.getOrCreateGlobalAddressBookId(request.pickup.address);
+          this.logger.logAggregator('Using global Glovo addressBookId', { glovoAddressBookId });
+        } else {
+          this.logger.warn('No pickup address provided; Glovo may fallback to raw pickup if supported');
         }
-      } else {
-        this.logger.warn('No businessId provided in request.meta for Glovo lookup');
+      } catch (err) {
+        this.logger.error('Failed to get/create global Glovo address book ID', err);
       }
       // Geocode delivery address for Glovo
       try {

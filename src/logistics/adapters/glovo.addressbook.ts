@@ -2,11 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { GeocodeService } from '../../utils/geocode.service';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { createHash } from 'crypto';
 
 
 @Injectable()
 export class GlovoAddressBookService {
   private glovoBaseUrl = process.env.GLOVO_BASE_URL || 'https://stageapi.glovoapp.com';
+  private static readonly DEFAULT_GLOVO_PHONE = '+2348130926960';
 
   constructor(
     private httpService: HttpService,
@@ -43,6 +45,54 @@ export class GlovoAddressBookService {
       console.log('[GlovoAddressBookService] Calling UPDATE address book endpoint for ID:', addressBookId);
       return this.updateAddressBookEntry(addressBookId, glovoPayload);
     }
+  }
+
+  // Normalize and hash an address string to cache/reuse address book entries globally
+  private hashAddress(address: string): string {
+    const norm = (address || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    return createHash('sha256').update(norm).digest('hex');
+  }
+
+  // Global get-or-create that uses a Supabase-backed cache table `glovo_address_book_map`
+  // Always uses DEFAULT_GLOVO_PHONE for address book creation
+  async getOrCreateGlobalAddressBookId(rawAddress: string): Promise<string> {
+    const geocode = await this.geocodeService.getGeocodeData(rawAddress);
+    if (!geocode) throw new Error('Failed to geocode address');
+    const formattedAddress = geocode.formattedAddress;
+    const coordinates = { latitude: geocode.coordinates[0], longitude: geocode.coordinates[1] };
+    const addressHash = this.hashAddress(formattedAddress);
+
+    const { supabase } = await import('../../auth/supabase.client');
+    const { data: existing } = await supabase
+      .from('glovo_address_book_map')
+      .select('glovo_address_book_id')
+      .eq('address_hash', addressHash)
+      .maybeSingle();
+    if (existing?.glovo_address_book_id) {
+      return existing.glovo_address_book_id as string;
+    }
+
+    const payload = {
+      address: formattedAddress,
+      addressDetails: '',
+      phoneNumber: GlovoAddressBookService.DEFAULT_GLOVO_PHONE,
+      coordinates,
+    };
+    const id = await this.createAddressBookEntry(payload);
+
+    await supabase
+      .from('glovo_address_book_map')
+      .upsert(
+        {
+          address_hash: addressHash,
+          formatted_address: formattedAddress,
+          phone_number: GlovoAddressBookService.DEFAULT_GLOVO_PHONE,
+          glovo_address_book_id: id,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'address_hash' }
+      );
+    return id;
   }
 
   async getToken(): Promise<string> {

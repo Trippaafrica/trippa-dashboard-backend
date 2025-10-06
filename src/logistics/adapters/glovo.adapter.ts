@@ -58,12 +58,14 @@ export class GlovoAdapter extends LogisticsProviderAdapter {
     await this.rateLimiter.waitForRateLimit('glovo');
     
     const body = {
-      pickupDetails: {
-        addressBook: {
-          id: addressBookId,
-        },
-        // pickupTime omitted (optional)
-      },
+      pickupDetails: addressBookId
+        ? { addressBook: { id: addressBookId } }
+        : {
+            rawAddress: (request as any).pickup?.formattedAddress || request.pickup.address,
+            coordinates: request.pickup.coordinates
+              ? { latitude: request.pickup.coordinates[0], longitude: request.pickup.coordinates[1] }
+              : undefined,
+          },
       deliveryAddress: {
         rawAddress: (request.delivery as any).formattedAddress || request.delivery.address,
         coordinates: request.delivery.coordinates
@@ -126,11 +128,22 @@ export class GlovoAdapter extends LogisticsProviderAdapter {
       // Wait for pacing (ensures spacing even if still under hard limit)
       await this.rateLimiter.waitForRateLimit('glovo');
 
-      // Pickup mapping: Prefer addressBookId if supplied, else raw address & coords
+      // Pickup mapping: Prefer addressBookId if supplied, else raw address & coords (geocode if missing)
       const addressBookId = request.meta?.glovoAddressBookId;
-      const pickupCoordinates = request.pickup.coordinates
+      let pickupCoordinates = request.pickup.coordinates
         ? { latitude: request.pickup.coordinates[0], longitude: request.pickup.coordinates[1] }
         : undefined;
+      if (!addressBookId && !pickupCoordinates && request.pickup.address) {
+        try {
+          const { getGeocodeData } = await import('../../utils/geocode.util');
+          const geo = await getGeocodeData(request.pickup.address);
+          if (geo?.coordinates) {
+            pickupCoordinates = { latitude: geo.coordinates[0], longitude: geo.coordinates[1] };
+          }
+        } catch (e) {
+          this.logger.warn('Pickup geocode failed; proceeding without coordinates');
+        }
+      }
 
       const deliveryCoordinates = request.delivery.coordinates
         ? { latitude: request.delivery.coordinates[0], longitude: request.delivery.coordinates[1] }
