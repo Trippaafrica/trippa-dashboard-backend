@@ -76,23 +76,11 @@ export class BusinessService {
     }
     // If pickup_address is being updated, handle Glovo logic
     const pickupAddress = updateDto.pickup_address || currentBusiness?.pickup_address;
-    // Always use the default Glovo phone number ONLY for address book creation
-    const pickupContactPhone = '+2348130926960';
     if (pickupAddress) {
-      const payload = {
-        address: pickupAddress,
-        addressDetails: '', // Always empty for Glovo
-        phoneNumber: pickupContactPhone,
-      };
-      if (!glovoAddressBookId) {
-        this.logger.logBusiness('glovo_address_book_id is null, creating new addressBook entry');
-        glovoAddressBookId = await this.glovoAddressBook.upsertAddressBookEntry(payload, null);
-        this.logger.logBusiness('Created glovoAddressBookId', { glovoAddressBookId });
-      } else {
-        this.logger.logBusiness('glovo_address_book_id exists, updating addressBook entry');
-        glovoAddressBookId = await this.glovoAddressBook.upsertAddressBookEntry(payload, glovoAddressBookId);
-        this.logger.logBusiness('Updated glovoAddressBookId', { glovoAddressBookId });
-      }
+      // Use global get-or-create so the cache table glovo_address_book_map is populated
+      this.logger.logBusiness('Resolving global Glovo addressBookId via cache service');
+      glovoAddressBookId = await this.glovoAddressBook.getOrCreateGlobalAddressBookId(pickupAddress);
+      this.logger.logBusiness('Resolved global glovoAddressBookId', { glovoAddressBookId });
       updateDto.glovoAddressBookId = glovoAddressBookId;
     } else {
       this.logger.logBusiness('pickup_address or phone not present, skipping Glovo logic');
