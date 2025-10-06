@@ -78,7 +78,17 @@ export class GlovoAddressBookService {
       phoneNumber: GlovoAddressBookService.DEFAULT_GLOVO_PHONE,
       coordinates,
     };
-    const id = await this.createAddressBookEntry(payload);
+    let id: string | null = null;
+    try {
+      id = await this.createAddressBookEntry(payload);
+    } catch (e: any) {
+      const status = e?.response?.status || e?.status;
+      if (status === 409) {
+        console.warn('[GlovoAddressBookService] Glovo create returned 409 (exists in another account). Returning null to allow fallback.');
+        return null as any; // caller should handle null by skipping Glovo
+      }
+      throw e;
+    }
 
     const { error: cacheUpsertError } = await supabase
       .from('glovo_address_book_map')

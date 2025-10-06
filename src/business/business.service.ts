@@ -85,7 +85,19 @@ export class BusinessService {
         this.logger.logBusiness('Found cached glovoAddressBookId', { glovoAddressBookId });
         updateDto.glovoAddressBookId = glovoAddressBookId;
       } else {
-        this.logger.logBusiness('No cached glovoAddressBookId found; skipping creation during profile update');
+        this.logger.logBusiness('No cached glovoAddressBookId found; creating via GlovoAddressBookService.getOrCreateGlobalAddressBookId');
+        try {
+          const createdId = await this.glovoAddressBook.getOrCreateGlobalAddressBookId(pickupAddress);
+          if (createdId) {
+            glovoAddressBookId = createdId;
+            updateDto.glovoAddressBookId = createdId;
+            this.logger.logBusiness('Created glovoAddressBookId and updated profile', { glovoAddressBookId: createdId });
+          } else {
+            this.logger.logBusiness('Glovo address creation returned null (likely 409/conflict); proceeding without Glovo ID');
+          }
+        } catch (e) {
+          this.logger.error('Failed to create Glovo addressBookId during profile update', e);
+        }
       }
     } else {
       this.logger.logBusiness('pickup_address or phone not present, skipping Glovo logic');
