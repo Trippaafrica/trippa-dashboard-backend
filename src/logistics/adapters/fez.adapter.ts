@@ -174,18 +174,41 @@ export class FezAdapter extends LogisticsProviderAdapter {
       weight: request.item.weight,
       pickUpState: fezPickupState,
       pickUpAddress: request.pickup.address,
+      // Third-party sender fields to override org defaults (per Fez docs)
+      thirdparty: 'true',
+      senderName: request.pickup.contactName || '',
+      senderAddress: request.pickup.address,
+      senderPhone: request.pickup.contactPhone,
     }];
     
     // Wait for rate limit before order creation request
     await this.rateLimiter.waitForRateLimit('fez');
     const resp = await firstValueFrom(this.httpService.post(fezOrderUrl, orderBody, { headers }));
     console.log('[FezAdapter] createOrder response body:', JSON.stringify(resp.data, null, 2));
-    // Fez returns { status, description, orderNos: { [uuid]: fezOrderNo }, duplicateUniqueIds }
+    // Handle both array and object responses for order numbers
     let fezOrderNo = '';
-    if (resp.data && resp.data.orderNos && typeof resp.data.orderNos === 'object') {
-      const orderNos = resp.data.orderNos;
-      // Get the first order number from the object
-      fezOrderNo = String(Object.values(orderNos)[0] || '');
+    const data = resp.data;
+    if (Array.isArray(data)) {
+      const first = data[0];
+      if (typeof first === 'string') {
+        fezOrderNo = first;
+      } else if (first && typeof first === 'object') {
+        fezOrderNo = String((first as any).orderNo || (first as any).order_no || (first as any).order_number || '');
+      }
+    } else if (data) {
+      if (Array.isArray((data as any).orderNos)) {
+        const first = (data as any).orderNos[0];
+        if (typeof first === 'string') {
+          fezOrderNo = first;
+        } else if (first && typeof first === 'object') {
+          fezOrderNo = String(first.orderNo || first.order_no || first.order_number || '');
+        }
+      } else if ((data as any).orderNos && typeof (data as any).orderNos === 'object') {
+        const orderNos = (data as any).orderNos;
+        fezOrderNo = String(Object.values(orderNos)[0] || '');
+      } else if ((data as any).orderNo) {
+        fezOrderNo = String((data as any).orderNo);
+      }
     }
     return {
       provider: 'fez',
