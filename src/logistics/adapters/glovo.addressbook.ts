@@ -98,6 +98,22 @@ export class GlovoAddressBookService {
     return id;
   }
 
+  // Lookup only: try to resolve a cached glovo_address_book_id for a given raw address
+  // Does NOT call Glovo APIs or create anything. Returns null if not found.
+  async lookupAddressBookIdByAddress(rawAddress: string): Promise<string | null> {
+    const geocode = await this.geocodeService.getGeocodeData(rawAddress);
+    if (!geocode) return null;
+    const formattedAddress = geocode.formattedAddress;
+    const addressHash = this.hashAddress(formattedAddress);
+    const { supabase } = await import('../../auth/supabase.client');
+    const { data: existing } = await supabase
+      .from('glovo_address_book_map')
+      .select('glovo_address_book_id')
+      .eq('address_hash', addressHash)
+      .maybeSingle();
+    return existing?.glovo_address_book_id || null;
+  }
+
   async getToken(): Promise<string> {
     // You may want to share this logic with GlovoAdapter
     const url = `${this.glovoBaseUrl}/oauth/token`;

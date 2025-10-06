@@ -77,11 +77,16 @@ export class BusinessService {
     // If pickup_address is being updated, handle Glovo logic
     const pickupAddress = updateDto.pickup_address || currentBusiness?.pickup_address;
     if (pickupAddress) {
-      // Use global get-or-create so the cache table glovo_address_book_map is populated
-      this.logger.logBusiness('Resolving global Glovo addressBookId via cache service');
-      glovoAddressBookId = await this.glovoAddressBook.getOrCreateGlobalAddressBookId(pickupAddress);
-      this.logger.logBusiness('Resolved global glovoAddressBookId', { glovoAddressBookId });
-      updateDto.glovoAddressBookId = glovoAddressBookId;
+      // Lookup-only: do NOT create here to avoid 409s and cross-account conflicts
+      this.logger.logBusiness('Lookup Glovo addressBookId from cache for pickup address');
+      const cachedId = await this.glovoAddressBook.lookupAddressBookIdByAddress(pickupAddress);
+      if (cachedId) {
+        glovoAddressBookId = cachedId;
+        this.logger.logBusiness('Found cached glovoAddressBookId', { glovoAddressBookId });
+        updateDto.glovoAddressBookId = glovoAddressBookId;
+      } else {
+        this.logger.logBusiness('No cached glovoAddressBookId found; skipping creation during profile update');
+      }
     } else {
       this.logger.logBusiness('pickup_address or phone not present, skipping Glovo logic');
     }
