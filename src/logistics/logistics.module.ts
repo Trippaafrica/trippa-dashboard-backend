@@ -25,6 +25,7 @@ import { OrderService } from './order.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GitInsuranceService } from './git-insurance.service';
 import { TableUpdatesGateway } from '../gateways/table-updates.gateway';
+import { GlovoAddressBookService } from './adapters/glovo.addressbook';
 
 @Module({
   imports: [
@@ -47,7 +48,8 @@ import { TableUpdatesGateway } from '../gateways/table-updates.gateway';
     GitInsuranceService,
     OrderService,
   TableUpdatesGateway,
-  FaramoveWebhookService
+  FaramoveWebhookService,
+  GlovoAddressBookService
   ],
   controllers: [LogisticsPartnerController, FezStatusSyncController, FezWebhookController, OrderController, TrackController, TrackingWebhookController, FaramoveDataController, FaramoveWebhookController],
   exports: [
@@ -62,7 +64,8 @@ import { TableUpdatesGateway } from '../gateways/table-updates.gateway';
     ProviderRateLimiterService,
     GitInsuranceService,
     OrderService,
-    FezStatusSyncService
+    FezStatusSyncService,
+    GlovoAddressBookService
   ]
 })
 export class LogisticsModule {}
