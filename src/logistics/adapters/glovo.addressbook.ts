@@ -80,7 +80,7 @@ export class GlovoAddressBookService {
     };
     const id = await this.createAddressBookEntry(payload);
 
-    await supabase
+    const { error: cacheUpsertError } = await supabase
       .from('glovo_address_book_map')
       .upsert(
         {
@@ -92,6 +92,9 @@ export class GlovoAddressBookService {
         },
         { onConflict: 'address_hash' }
       );
+    if (cacheUpsertError) {
+      console.warn('[GlovoAddressBookService] Cache upsert failed for addressHash', addressHash, cacheUpsertError);
+    }
     return id;
   }
 

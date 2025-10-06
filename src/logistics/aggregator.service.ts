@@ -168,20 +168,13 @@ export class LogisticsAggregatorService {
     let geocodedDelivery: { formattedAddress?: string, coordinates?: [number, number] } = {};
     
     if (pickupState === 'lagos' && deliveryState === 'lagos') {
-      const businessId = request.meta?.businessId;
-      if (businessId) {
-        try {
-          const { data: business, error } = await (await import('../auth/supabase.client')).supabase
-            .from('business')
-            .select('glovo_address_book_id')
-            .eq('id', businessId)
-            .single();
-          if (!error && business?.glovo_address_book_id) {
-            glovoAddressBookId = business.glovo_address_book_id;
-          }
-        } catch (err) {
-          console.error('Error fetching business for Glovo address book ID:', err);
+      // Use global reusable address book ID keyed by pickup address
+      try {
+        if (request.pickup?.address) {
+          glovoAddressBookId = await this.glovoAddressBookService.getOrCreateGlobalAddressBookId(request.pickup.address);
         }
+      } catch (err) {
+        console.error('Error getting/creating global Glovo address book ID:', err);
       }
 
       try {

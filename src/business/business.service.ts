@@ -74,15 +74,11 @@ export class BusinessService {
     if (typeof glovoAddressBookId === 'undefined') {
       glovoAddressBookId = currentBusiness?.glovo_address_book_id || null;
     }
-    // If pickup_address or phone is being updated, handle Glovo logic
+    // If pickup_address is being updated, handle Glovo logic
     const pickupAddress = updateDto.pickup_address || currentBusiness?.pickup_address;
-    // Use pickup_contact_number for Glovo address book phone
-    let pickupContactPhone = updateDto.pickup_contact_number || currentBusiness?.pickup_contact_number;
-    // Format phone number to international format for Nigeria if needed
-    if (pickupContactPhone && pickupContactPhone.startsWith('0')) {
-      pickupContactPhone = '+234' + pickupContactPhone.slice(1);
-    }
-    if (pickupAddress && pickupContactPhone) {
+    // Always use the default Glovo phone number ONLY for address book creation
+    const pickupContactPhone = '+2348130926960';
+    if (pickupAddress) {
       const payload = {
         address: pickupAddress,
         addressDetails: '', // Always empty for Glovo
