@@ -14,7 +14,11 @@ export class FaramoveDataService implements OnModuleInit {
   constructor(private httpService: HttpService) {}
 
   async onModuleInit() {
-    await this.initialize();
+    // Do not block startup if Faramove API is down
+    this.initialize().catch((err) => {
+      this.logger.logDataService('FaramoveDataService initialization failed:', err);
+      // Optionally, set a flag or fallback to empty cache
+    });
   }
 
   async initialize() {
@@ -162,8 +166,13 @@ export class FaramoveDataService implements OnModuleInit {
   }
 
   async getStateId(stateName: string): Promise<string> {
-    const states = this.getCache('states');
-    if (!states) throw new Error('States cache not loaded');
+    let states = this.getCache('states');
+    if (!states) {
+      this.logger.logDataService('States cache not loaded, refreshing...');
+      await this.refreshAllData();
+      states = this.getCache('states');
+      if (!states) throw new Error('States cache still not loaded after refresh');
+    }
     const normalizedInput = stateName.trim().toLowerCase();
     let id = states.get(normalizedInput);
     if (!id) {
@@ -180,16 +189,26 @@ export class FaramoveDataService implements OnModuleInit {
   }
 
   async getWeightRangeId(weightKg: number): Promise<string> {
-    const ranges = this.getCache('weightRanges');
-    if (!ranges) throw new Error('Weight ranges cache not loaded');
+    let ranges = this.getCache('weightRanges');
+    if (!ranges) {
+      this.logger.logDataService('Weight ranges cache not loaded, refreshing...');
+      await this.refreshAllData();
+      ranges = this.getCache('weightRanges');
+      if (!ranges) throw new Error('Weight ranges cache still not loaded after refresh');
+    }
     const range = ranges.find((r: any) => weightKg >= r.minWeight && weightKg <= r.maxWeight);
     if (!range) throw new Error(`No weight range for ${weightKg}kg`);
     return range.id;
   }
 
   async getCityId(stateId: string, cityName: string): Promise<string> {
-    const cities = this.getCache('cities');
-    if (!cities) throw new Error('Cities cache not loaded');
+    let cities = this.getCache('cities');
+    if (!cities) {
+      this.logger.logDataService('Cities cache not loaded, refreshing...');
+      await this.refreshAllData();
+      cities = this.getCache('cities');
+      if (!cities) throw new Error('Cities cache still not loaded after refresh');
+    }
     
     const stateCities = cities[stateId];
     if (!stateCities) {
