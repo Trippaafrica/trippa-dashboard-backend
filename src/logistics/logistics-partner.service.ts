@@ -266,6 +266,28 @@ export class LogisticsPartnerService implements OnModuleInit {
       customOrderId = generateCustomOrderId();
     }
     
+    // Ensure pickup.contactName is set for Fez and other providers that need it
+    // If not provided in request, fetch from business and set it
+    if (!request.pickup?.contactName && businessId) {
+      try {
+        const { data: business, error: businessError } = await supabase
+          .from('business')
+          .select('business_name')
+          .eq('id', businessId)
+          .single();
+        
+        if (!businessError && business?.business_name) {
+          request.pickup = {
+            ...request.pickup,
+            contactName: business.business_name
+          };
+          console.log('[CreateOrder] Set pickup.contactName to business name:', business.business_name);
+        }
+      } catch (err) {
+        console.error('[CreateOrder] Failed to fetch business name for pickup.contactName:', err);
+      }
+    }
+    
     // 1. Call the adapter FIRST to validate with external provider before any database operations
     let orderResult;
     let tempOrderId = `temp-${Date.now()}`; // Temporary ID for providers that need an ID
@@ -419,3 +441,4 @@ export class LogisticsPartnerService implements OnModuleInit {
     return data;
   }
 }
+
