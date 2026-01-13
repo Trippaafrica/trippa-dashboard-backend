@@ -20,18 +20,21 @@ import { ProviderRateLimiterService } from '../utils/provider-rate-limiter.servi
 import { OrderController } from './order.controller';
 import { DhlAdapter } from './adapters/dhl/dhl.adapter';
 import { TrackController } from './track.controller';
+import { TrackingFacadeController } from './tracking-facade.controller';
 import { TrackingWebhookController } from './tracking-webhook.controller';
 import { OrderService } from './order.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GitInsuranceService } from './git-insurance.service';
 import { TableUpdatesGateway } from '../gateways/table-updates.gateway';
 import { GlovoAddressBookService } from './adapters/glovo.addressbook';
+import { ProviderWebhookModule } from '../shopify-webhook/provider-webhook.module';
 
 @Module({
   imports: [
     HttpModule,
     WalletModule,
-    NotificationsModule
+    NotificationsModule,
+    ProviderWebhookModule,
   ],
   providers: [
     LogisticsAggregatorService,
@@ -42,16 +45,26 @@ import { GlovoAddressBookService } from './adapters/glovo.addressbook';
     GigAdapter,
     DhlAdapter,
     FaramoveDataService,
-  FezStatusSyncService,
+    FezStatusSyncService,
     GeocodeService,
     ProviderRateLimiterService,
     GitInsuranceService,
     OrderService,
-  TableUpdatesGateway,
-  FaramoveWebhookService,
-  GlovoAddressBookService
+    TableUpdatesGateway,
+    FaramoveWebhookService,
+    GlovoAddressBookService,
   ],
-  controllers: [LogisticsPartnerController, FezStatusSyncController, FezWebhookController, OrderController, TrackController, TrackingWebhookController, FaramoveDataController, FaramoveWebhookController],
+  controllers: [
+    LogisticsPartnerController,
+    FezStatusSyncController,
+    FezWebhookController,
+    OrderController,
+    TrackController,
+    TrackingFacadeController,
+    TrackingWebhookController,
+    FaramoveDataController,
+    FaramoveWebhookController,
+  ],
   exports: [
     LogisticsAggregatorService,
     LogisticsPartnerService,
@@ -65,7 +78,7 @@ import { GlovoAddressBookService } from './adapters/glovo.addressbook';
     GitInsuranceService,
     OrderService,
     FezStatusSyncService,
-    GlovoAddressBookService
-  ]
+    GlovoAddressBookService,
+  ],
 })
 export class LogisticsModule {}

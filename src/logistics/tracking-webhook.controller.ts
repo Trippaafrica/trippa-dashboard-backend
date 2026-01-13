@@ -1,15 +1,21 @@
-
-import { Controller, Post, Body, HttpCode, NotFoundException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  NotFoundException,
+} from '@nestjs/common';
 import { supabase } from '../auth/supabase.client';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { LogisticsPartnerService } from './logistics-partner.service';
+import { ProviderWebhookService } from '../shopify-webhook/provider-webhook.service';
 
 @Controller('tracking/webhook')
-
 export class TrackingWebhookController {
   constructor(
     private readonly notificationsGateway: NotificationsGateway,
-    private readonly partnerService: LogisticsPartnerService
+    private readonly partnerService: LogisticsPartnerService,
+    private readonly providerWebhookService: ProviderWebhookService
   ) {}
 
   @Post()
@@ -21,14 +27,14 @@ export class TrackingWebhookController {
     // 1. Lookup the order in the DB
     let { data: order, error } = await supabase
       .from('order')
-      .select('id, order_id, partner_id, partner_response')
+      .select('id, order_id, partner_id, partner_response, shopify_order_id')
       .eq('order_id', body.orderId)
       .single();
     if (error || !order) {
       // fallback: try by UUID id
       const fallback = await supabase
         .from('order')
-        .select('id, order_id, partner_id, partner_response')
+        .select('id, order_id, partner_id, partner_response, shopify_order_id')
         .eq('id', body.orderId)
         .single();
       order = fallback.data;
@@ -57,12 +63,31 @@ export class TrackingWebhookController {
     const adapter = adapterMap[partnerName];
     if (!adapter) return { error: 'No adapter for this partner' };
     // 4. Get the provider's order/tracking ID
-    let providerOrderId = order.partner_response?.orderId || order.partner_response?.trackingNumber || order.order_id;
+    let providerOrderId =
+      order.partner_response?.orderId ||
+      order.partner_response?.trackingNumber ||
+      order.order_id;
     if (!providerOrderId) providerOrderId = order.id;
     // 5. Call the adapter's trackOrder
     const tracking = await adapter.trackOrder(providerOrderId);
     // 6. Emit websocket event for real-time update
-    this.notificationsGateway.sendOrderStatusUpdate(body.orderId, tracking.status || 'Unknown');
+    this.notificationsGateway.sendOrderStatusUpdate(
+      body.orderId,
+      tracking.status || 'Unknown'
+    );
+
+    // 7. Trigger Shopify webhook if this is a Shopify order
+    if (order.shopify_order_id && tracking.status) {
+      this.providerWebhookService
+        .triggerWebhookForOrder(order.id, tracking.status)
+        .catch((err) => {
+          console.error(
+            '[TrackingWebhookController] Failed to trigger Shopify webhook:',
+            err
+          );
+        });
+    }
+
     return { success: true, tracking };
   }
 }

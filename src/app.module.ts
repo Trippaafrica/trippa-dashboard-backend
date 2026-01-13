@@ -15,6 +15,7 @@ import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 
 import { ShopifyAuthModule } from './shopify-auth/shopify-auth.module';
+import { ProviderWebhookModule } from './shopify-webhook/provider-webhook.module';
 
 import { GlovoWebhookModule } from './gateways/glovo-webhook.module';
 
@@ -48,10 +49,11 @@ import { LogisticsModule } from './logistics/logistics.module';
     DeliveriesModule,
     ScheduledShipmentsModule,
     NotificationsModule,
-    HealthModule
-  ,ShopifyAuthModule
-  ,GlovoWebhookModule
-  ,LogisticsModule
+    HealthModule,
+    ShopifyAuthModule,
+    ProviderWebhookModule,
+    GlovoWebhookModule,
+    LogisticsModule,
   ],
   controllers: [ApiStatsController, RateLimiterController],
   providers: [ApiStatsService, ProviderRateLimiterService, TableUpdatesGateway],

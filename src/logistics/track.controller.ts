@@ -4,6 +4,7 @@ import { supabase } from '../auth/supabase.client';
 import { AppLogger } from '../utils/logger.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { TableUpdatesGateway } from '../gateways/table-updates.gateway';
+import { ProviderWebhookService } from '../shopify-webhook/provider-webhook.service';
 
 @Controller('logistics/track')
 export class TrackController {
@@ -13,6 +14,7 @@ export class TrackController {
     private readonly partnerService: LogisticsPartnerService,
     private readonly notificationsGateway: NotificationsGateway,
     private readonly tableUpdatesGateway: TableUpdatesGateway,
+    private readonly providerWebhookService: ProviderWebhookService
   ) {}
 
   /**
@@ -39,7 +41,7 @@ export class TrackController {
         .single();
       this.logger.logApiAuth('Shopify authentication for tracking', {
         shopdomain,
-        businessFound: !!business?.id
+        businessFound: !!business?.id,
       });
       if (error || !business?.id) {
         this.logger.error('Invalid shopdomain or business not found', error);
@@ -53,9 +55,9 @@ export class TrackController {
         .select('id')
         .eq('api_key', apiKey)
         .single();
-      this.logger.logApiAuth('API key authentication for tracking', { 
-        apiKey: apiKey?.substring(0, 10) + '...', 
-        businessFound: !!business?.id 
+      this.logger.logApiAuth('API key authentication for tracking', {
+        apiKey: apiKey?.substring(0, 10) + '...',
+        businessFound: !!business?.id,
       });
       if (error || !business?.id) {
         this.logger.error('Invalid API key or business not found', error);
@@ -63,24 +65,39 @@ export class TrackController {
       }
       businessId = business.id;
     } else if (authHeader && authHeader.startsWith('Bearer ')) {
-      // Dashboard user: lookup business by supabase_user_id from token
+      // Prefer treating Bearer as store API key first
       const token = authHeader.replace('Bearer ', '');
-      const { data: userData, error: userError } = await supabase.auth.getUser(token);
-      if (userError || !userData?.user?.id) {
-        throw new NotFoundException('Invalid or expired token');
-      }
-      const supabaseUserId = userData.user.id;
-      const { data: business, error } = await supabase
+      const { data: businessByKey } = await supabase
         .from('business')
         .select('id')
-        .eq('supabase_user_id', supabaseUserId)
+        .eq('api_key', token)
         .single();
-      if (error || !business?.id) {
-        throw new NotFoundException('Business not found for authenticated user');
+      if (businessByKey?.id) {
+        businessId = businessByKey.id;
+      } else {
+        // Fallback: treat as Supabase user JWT
+        const { data: userData, error: userError } =
+          await supabase.auth.getUser(token);
+        if (userError || !userData?.user?.id) {
+          throw new NotFoundException('Invalid or expired token');
+        }
+        const supabaseUserId = userData.user.id;
+        const { data: business, error } = await supabase
+          .from('business')
+          .select('id')
+          .eq('supabase_user_id', supabaseUserId)
+          .single();
+        if (error || !business?.id) {
+          throw new NotFoundException(
+            'Business not found for authenticated user'
+          );
+        }
+        businessId = business.id;
       }
-      businessId = business.id;
     } else {
-      throw new NotFoundException('Missing authentication: provide shopdomain, x-api-key, or Bearer token');
+      throw new NotFoundException(
+        'Missing authentication: provide shopdomain, x-api-key, or Bearer token'
+      );
     }
     // --- END AUTHENTICATION BLOCK ---
 
@@ -103,16 +120,31 @@ export class TrackController {
         if (shopdomain) {
           const shopifyOrder = await supabase
             .from('order')
-            .select('id, order_id, shopify_order_id, partner_id, partner_response')
+            .select(
+              'id, order_id, shopify_order_id, partner_id, partner_response'
+            )
             .eq('shopify_order_id', orderId)
             .single();
           order = shopifyOrder.data;
           if (shopifyOrder.error || !order) {
-            console.error('[Backend] Order not found for shopify_order_id:', orderId, '| error:', error, fallback.error, shopifyOrder.error);
+            console.error(
+              '[Backend] Order not found for shopify_order_id:',
+              orderId,
+              '| error:',
+              error,
+              fallback.error,
+              shopifyOrder.error
+            );
             throw new NotFoundException('Order not found');
           }
         } else {
-          console.error('[Backend] Order not found for orderId:', orderId, '| error:', error, fallback.error);
+          console.error(
+            '[Backend] Order not found for orderId:',
+            orderId,
+            '| error:',
+            error,
+            fallback.error
+          );
           throw new NotFoundException('Order not found');
         }
       }
@@ -138,15 +170,22 @@ export class TrackController {
     const adapter = adapterMap[partnerName];
     if (!adapter) throw new NotFoundException('No adapter for this partner');
     // 4. Get the provider's order/tracking ID
-    let providerOrderId = order.partner_response?.orderId || order.partner_response?.trackingNumber || order.order_id;
+    let providerOrderId =
+      order.partner_response?.orderId ||
+      order.partner_response?.trackingNumber ||
+      order.order_id;
     if (!providerOrderId) providerOrderId = order.id;
-    this.logger.logTracking('Routing to partner', { partnerName, providerOrderId });
+    this.logger.logTracking('Routing to partner', {
+      partnerName,
+      providerOrderId,
+    });
     // 5. Call the adapter's trackOrder
     const tracking = await adapter.trackOrder(providerOrderId);
 
     // Persist latest provider status to DB and emit updates
     try {
-      const latestStatus = tracking?.status || tracking?.meta?.order?.orderStatus || 'Unknown';
+      const latestStatus =
+        tracking?.status || tracking?.meta?.order?.orderStatus || 'Unknown';
       if (latestStatus && order?.id) {
         const updateResp = await supabase
           .from('order')
@@ -159,9 +198,15 @@ export class TrackController {
           if (updated.length) {
             const localOrderId = updated[0].order_id || updated[0].id;
             try {
-              this.notificationsGateway.sendOrderStatusUpdate(String(localOrderId), latestStatus);
+              this.notificationsGateway.sendOrderStatusUpdate(
+                String(localOrderId),
+                latestStatus
+              );
             } catch (e) {
-              this.logger.error('Failed to emit order status update via websocket', e);
+              this.logger.error(
+                'Failed to emit order status update via websocket',
+                e
+              );
             }
             try {
               this.tableUpdatesGateway.broadcastTableUpdate('order', {
@@ -171,9 +216,21 @@ export class TrackController {
             } catch (e2) {
               this.logger.error('Failed to broadcast table update', e2);
             }
+
+            // Trigger Shopify webhook if this is a Shopify order
+            if (order.shopify_order_id) {
+              this.providerWebhookService
+                .triggerWebhookForOrder(order.id, latestStatus)
+                .catch((err) => {
+                  this.logger.error('Failed to trigger Shopify webhook', err);
+                });
+            }
           }
         } else {
-          this.logger.error('Failed to persist tracking status to DB', updateResp.error);
+          this.logger.error(
+            'Failed to persist tracking status to DB',
+            updateResp.error
+          );
         }
       }
     } catch (persistErr) {

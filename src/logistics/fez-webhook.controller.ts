@@ -2,12 +2,14 @@ import { Controller, Post, Body, HttpCode } from '@nestjs/common';
 import { supabase } from '../auth/supabase.client';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { TableUpdatesGateway } from '../gateways/table-updates.gateway';
+import { ProviderWebhookService } from '../shopify-webhook/provider-webhook.service';
 
 @Controller('fez/webhook')
 export class FezWebhookController {
   constructor(
     private readonly notificationsGateway: NotificationsGateway,
     private readonly tableUpdatesGateway: TableUpdatesGateway,
+    private readonly providerWebhookService: ProviderWebhookService
   ) {}
 
   @Post()
@@ -55,27 +57,51 @@ export class FezWebhookController {
           for (const row of updatedRows) {
             const localOrderId = row?.order_id || row?.id || orderNumber;
             // Notify specific order listeners
-            this.notificationsGateway.sendOrderStatusUpdate(String(localOrderId), status);
+            this.notificationsGateway.sendOrderStatusUpdate(
+              String(localOrderId),
+              status
+            );
+
+            // Trigger Shopify webhook for orders that have shopify_order_id
+            if (row?.shopify_order_id) {
+              this.providerWebhookService
+                .triggerWebhookForOrder(row.id, status)
+                .catch((err) => {
+                  console.error(
+                    '[FezWebhookController] Failed to trigger Shopify webhook:',
+                    err
+                  );
+                });
+            }
           }
         } catch (emitErr) {
           // Log but do not fail the webhook
-          console.error('[FezWebhookController] WebSocket emit failed:', emitErr);
+          console.error(
+            '[FezWebhookController] WebSocket emit failed:',
+            emitErr
+          );
         }
 
         try {
           // Broadcast a generic table update for dashboards/grids
           this.tableUpdatesGateway.broadcastTableUpdate('order', {
-            orderNumbers: updatedRows.map(r => r.order_id || r.id),
+            orderNumbers: updatedRows.map((r) => r.order_id || r.id),
             status,
           });
         } catch (emitErr2) {
-          console.error('[FezWebhookController] Table broadcast failed:', emitErr2);
+          console.error(
+            '[FezWebhookController] Table broadcast failed:',
+            emitErr2
+          );
         }
       }
 
       return { success: true, updatedCount: updatedRows.length };
     } catch (e: any) {
-      console.error('[FezWebhookController] Error handling webhook:', e?.message || e);
+      console.error(
+        '[FezWebhookController] Error handling webhook:',
+        e?.message || e
+      );
       return { error: e?.message || 'Unhandled error' };
     }
   }
