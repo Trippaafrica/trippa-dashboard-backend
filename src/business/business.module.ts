@@ -5,13 +5,15 @@ import { HttpModule } from '@nestjs/axios';
 import { WalletModule } from './wallet.module';
 import { BusinessController } from './business.controller';
 import { BusinessAnalyticsController } from './business-analytics.controller';
+import { StoreController } from './store.controller';
+import { ShipmentAnalyticsController } from './shipment-analytics.controller';
 import { BusinessService } from './business.service';
 import { GlovoAddressBookService } from '../logistics/adapters/glovo.addressbook';
 import { GeocodeService } from '../utils/geocode.service';
 
 @Module({
   imports: [HttpModule, WalletModule],
-  controllers: [BusinessController, BusinessAnalyticsController],
+  controllers: [BusinessController, BusinessAnalyticsController, StoreController, ShipmentAnalyticsController],
   providers: [BusinessService, GlovoAddressBookService, GeocodeService],
   exports: [BusinessService, GlovoAddressBookService],
 })
