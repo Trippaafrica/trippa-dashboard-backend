@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { supabase } from '../auth/supabase.client';
 
 @Injectable()
@@ -37,7 +38,10 @@ export class ShopifyAuthService {
     return { success: true, businessId: updatedBusiness.id };
   }
     async handleShopifyRegister(data: any) {
-      const { shopify_access_token, business_name, email, phone, password, shopGid, shopdomain } = data;
+      // Supports both Shopify and WooCommerce payloads
+      // Shopify: { platform: 'shopify', shopify_access_token, business_name, email, phone, password?, shopGid?, shopdomain }
+      // WooCommerce: { platform: 'woocommerce', business_name, email, phone, shopdomain, webhookUrl? }
+      const { platform = 'shopify', shopify_access_token, business_name, email, phone, password, shopGid, shopdomain, webhookUrl } = data;
       if (!email) {
         throw new Error('email is required');
       }
@@ -84,14 +88,22 @@ export class ShopifyAuthService {
       let business;
       if (existingBusiness) {
         // Update existing business
+        // Ensure api_key exists (generate if missing)
+        const existingApiKey: string | null = (existingBusiness as any).api_key || null;
+        const apiKey = existingApiKey || randomBytes(32).toString('hex');
+
         const updatePayload = {
-          shopify_access_token,
-          type: 'shopify',
+          // Only include Shopify access token if platform is Shopify
+          shopify_access_token: platform === 'shopify' ? shopify_access_token : existingBusiness.shopify_access_token,
+          type: platform,
           business_name,
           phone,
           supabase_user_id,
           shopGid,
           shopdomain,
+          // Persist webhookUrl when provided (primarily for WooCommerce)
+          webhook_url: webhookUrl ?? existingBusiness.webhook_url ?? null,
+          api_key: apiKey,
           updated_at: new Date().toISOString(),
         };
         const { data: updatedBusiness, error: updateError } = await supabase
@@ -102,18 +114,23 @@ export class ShopifyAuthService {
           .single();
         if (updateError) throw updateError;
         business = updatedBusiness;
+        return { success: true, businessId: business.id, apiKey };
       } else {
         // Create new business (password is optional)
+        const apiKey = randomBytes(32).toString('hex');
         const createPayload = {
           business_name,
           email,
           phone,
-          shopify_access_token,
-          type: 'shopify',
+          // Only store Shopify token if platform is Shopify
+          shopify_access_token: platform === 'shopify' ? shopify_access_token : null,
+          type: platform,
           status: 'active',
           supabase_user_id,
           shopGid,
           shopdomain,
+          webhook_url: webhookUrl ?? null,
+          api_key: apiKey,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -124,7 +141,9 @@ export class ShopifyAuthService {
           .single();
         if (createError) throw createError;
         business = newBusiness;
+        return { success: true, businessId: business.id, apiKey };
       }
-      return { success: true, businessId: business.id };
+      // Unreachable fallback
+      // return { success: true, businessId: business.id };
     }
 }
