@@ -60,22 +60,32 @@ export class QuotesController {
         }
         businessId = business.id;
       } else if (authHeader && authHeader.startsWith('Bearer ')) {
-        // Dashboard user: lookup business by supabase_user_id from token
+       // Prefer treating Bearer as store API key first
         const token = authHeader.replace('Bearer ', '');
-        const { data: userData, error: userError } = await supabase.auth.getUser(token);
-        if (userError || !userData?.user?.id) {
-          throw new BadRequestException('Invalid or expired token');
-        }
-        const supabaseUserId = userData.user.id;
-        const { data: business, error } = await supabase
+        const { data: businessByKey } = await supabase
           .from('business')
           .select('id')
-          .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
+          .eq('api_key', token)
           .single();
-        if (error || !business?.id) {
-          throw new BadRequestException('Business not found for authenticated user');
+        if (businessByKey?.id) {
+          businessId = businessByKey.id;
+        } else {
+          // Fallback: treat as Supabase user JWT
+          const { data: userData, error: userError } = await supabase.auth.getUser(token);
+          if (userError || !userData?.user?.id) {
+            throw new BadRequestException('Invalid or expired token');
+          }
+          const supabaseUserId = userData.user.id;
+          const { data: business, error } = await supabase
+            .from('business')
+            .select('id')
+            .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`)
+            .single();
+          if (error || !business?.id) {
+            throw new BadRequestException('Business not found for authenticated user');
+          }
+          businessId = business.id;
         }
-        businessId = business.id;
       } else {
         throw new BadRequestException('Missing authentication: provide x-api-key, shopdomain, or Bearer token');
       }
