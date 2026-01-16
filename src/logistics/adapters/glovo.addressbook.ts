@@ -124,6 +124,38 @@ export class GlovoAddressBookService {
     return existing?.glovo_address_book_id || null;
   }
 
+  /**
+   * Get formatted address and coordinates without creating Glovo address book entry
+   * Useful for validation and caching checks
+   */
+  async getFormattedAddressInfo(rawAddress: string): Promise<{
+    formattedAddress: string;
+    coordinates: { latitude: number; longitude: number };
+    addressHash: string;
+  } | null> {
+    const geocode = await this.geocodeService.getGeocodeData(rawAddress);
+    if (!geocode) return null;
+    return {
+      formattedAddress: geocode.formattedAddress,
+      coordinates: { latitude: geocode.coordinates[0], longitude: geocode.coordinates[1] },
+      addressHash: this.hashAddress(geocode.formattedAddress),
+    };
+  }
+
+  /**
+   * Check if an address exists in the cache without geocoding (for quick lookups)
+   * Returns the Glovo address book ID if found, null otherwise
+   */
+  async quickLookupByHash(addressHash: string): Promise<string | null> {
+    const { supabase } = await import('../../auth/supabase.client');
+    const { data: existing } = await supabase
+      .from('glovo_address_book_map')
+      .select('glovo_address_book_id')
+      .eq('address_hash', addressHash)
+      .maybeSingle();
+    return existing?.glovo_address_book_id || null;
+  }
+
   async getToken(): Promise<string> {
     // You may want to share this logic with GlovoAdapter
     const url = `${this.glovoBaseUrl}/oauth/token`;
@@ -139,20 +171,105 @@ export class GlovoAddressBookService {
   async createAddressBookEntry(payload: any): Promise<string> {
     const token = await this.getToken();
     const url = `${this.glovoBaseUrl}/v2/laas/addresses`;
-    const headers = { Authorization: `Bearer ${token}` };
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     console.log('[GlovoAddressBookService] Sending POST to Glovo:', url, payload);
-    const resp = await firstValueFrom(this.httpService.post(url, payload, { headers }));
-    console.log('[GlovoAddressBookService] Glovo create response:', resp.data);
-    return resp.data.id;
+    
+    try {
+      const resp = await firstValueFrom(this.httpService.post(url, payload, { headers }));
+      console.log('[GlovoAddressBookService] Glovo create response:', resp.data);
+      return resp.data.id;
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const errorData = error?.response?.data;
+      
+      // Handle 409 Conflict - Address already exists
+      if (status === 409) {
+        console.log('[GlovoAddressBookService] Address already exists in Glovo (409), attempting lookup...');
+        // The address exists but might be in another account's address book
+        // Try to extract ID from error response if available
+        if (errorData?.id) {
+          return errorData.id;
+        }
+        throw new Error('GLOVO_ADDRESS_EXISTS_DIFFERENT_ACCOUNT');
+      }
+      
+      console.error('[GlovoAddressBookService] Glovo create failed:', { status, errorData });
+      throw error;
+    }
   }
 
   async updateAddressBookEntry(addressBookId: string, payload: any): Promise<string> {
     const token = await this.getToken();
     const url = `${this.glovoBaseUrl}/v2/laas/addresses/${addressBookId}`;
-    const headers = { Authorization: `Bearer ${token}` };
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     console.log('[GlovoAddressBookService] Sending PUT to Glovo:', url, payload);
-    const resp = await firstValueFrom(this.httpService.put(url, payload, { headers }));
-    console.log('[GlovoAddressBookService] Glovo update response:', resp.data);
-    return resp.data.id;
+    
+    try {
+      const resp = await firstValueFrom(this.httpService.put(url, payload, { headers }));
+      console.log('[GlovoAddressBookService] Glovo update response:', resp.data);
+      return resp.data.id;
+    } catch (error: any) {
+      console.error('[GlovoAddressBookService] Glovo update failed:', error?.response?.data);
+      throw error;
+    }
+  }
+
+  /**
+   * Get statistics about the global address book cache
+   * Useful for monitoring and optimization
+   */
+  async getCacheStatistics(): Promise<{
+    totalAddresses: number;
+    uniqueHashes: number;
+    recentAdditions: number;
+  }> {
+    const { supabase } = await import('../../auth/supabase.client');
+    
+    // Total addresses in cache
+    const { count: totalCount } = await supabase
+      .from('glovo_address_book_map')
+      .select('*', { count: 'exact', head: true });
+    
+    // Recent additions (last 24 hours)
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count: recentCount } = await supabase
+      .from('glovo_address_book_map')
+      .select('*', { count: 'exact', head: true })
+      .gte('updated_at', oneDayAgo);
+    
+    return {
+      totalAddresses: totalCount || 0,
+      uniqueHashes: totalCount || 0, // Same as total since hash is unique
+      recentAdditions: recentCount || 0,
+    };
+  }
+
+  /**
+   * Clean up orphaned or old address book entries from cache
+   * Can be called periodically to maintain cache health
+   */
+  async cleanupOldEntries(daysOld: number = 90): Promise<number> {
+    const { supabase } = await import('../../auth/supabase.client');
+    const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000).toISOString();
+    
+    const { data: oldEntries } = await supabase
+      .from('glovo_address_book_map')
+      .select('address_hash')
+      .lt('updated_at', cutoffDate);
+    
+    if (!oldEntries || oldEntries.length === 0) return 0;
+    
+    const { error } = await supabase
+      .from('glovo_address_book_map')
+      .delete()
+      .lt('updated_at', cutoffDate);
+    
+    if (error) {
+      console.error('[GlovoAddressBookService] Cleanup failed:', error);
+      return 0;
+    }
+    
+    console.log(`[GlovoAddressBookService] Cleaned up ${oldEntries.length} old address book entries`);
+    return oldEntries.length;
   }
 }
