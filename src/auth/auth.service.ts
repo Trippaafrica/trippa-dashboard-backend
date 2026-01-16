@@ -148,11 +148,25 @@ export class AuthService {
           .or(`supabase_user_id.eq.${supabaseUserId},id.eq.${supabaseUserId}`);
       }
     }
-    // 3. Return Supabase access token as JWT
+    // 3. Return Supabase access token as JWT along with business data
     return {
       access_token: data.session?.access_token,
       refresh_token: data.session?.refresh_token,
-      user: data.user,
+      user: {
+        ...data.user,
+        // Include business data so frontend has access to business_name, phone, etc
+        business_name: business?.business_name || data.user?.user_metadata?.businessName || '',
+        phone: business?.phone || data.user?.phone || '',
+        email: business?.email || data.user?.email || '',
+        pickup_address: business?.pickup_address || '',
+        pickup_city: business?.pickup_city || '',
+        pickup_state: business?.pickup_state || '',
+        pickup_contact_number: business?.pickup_contact_number || '',
+        pickup_country: business?.pickup_country || '',
+        profile_picture: business?.profile_picture || '',
+        wallet_balance: business?.wallet_balance || 0,
+        api_key: business?.api_key || '',
+      },
     };
   }
 
