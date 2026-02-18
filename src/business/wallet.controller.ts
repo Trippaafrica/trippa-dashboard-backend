@@ -358,7 +358,7 @@
 
 
 
-import { Controller, Post, Body, Get, Query, HttpException, Req, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Put, Body, Get, Query, HttpException, Req, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import { WalletService } from './wallet.service';
 import { supabase } from '../auth/supabase.client';
@@ -366,6 +366,101 @@ import { supabase } from '../auth/supabase.client';
 @Controller('wallet')
 export class WalletController {
   constructor(private readonly walletService: WalletService) {}
+
+  private async verifyAdminToken(req: any): Promise<{ id: string | number; email?: string }> {
+    const authHeader = req?.headers?.authorization || req?.headers?.Authorization;
+    if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+      throw new BadRequestException('Missing or invalid Authorization header');
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: userData, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !userData?.user?.id) {
+      throw new BadRequestException('Invalid or expired admin token');
+    }
+
+    const { data: admins, error: adminError } = await supabase
+      .from('admin')
+      .select('id, email')
+      .eq('supabase_user_id', userData.user.id)
+      .limit(1);
+
+    if (adminError || !admins || admins.length === 0) {
+      throw new BadRequestException('Unauthorized: Admin access required');
+    }
+
+    return admins[0];
+  }
+
+  private async getCurrentUsdToNgnRate(): Promise<number> {
+    const envRate = Number(process.env.SHOPIFY_USD_TO_NGN_RATE || 0);
+    const fallbackRate = Number.isFinite(envRate) && envRate > 0 ? envRate : 1600;
+
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'shopify_usd_to_ngn_rate')
+        .single();
+
+      if (!error && data?.value !== undefined && data?.value !== null) {
+        const parsed = Number(data.value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+
+      return fallbackRate;
+    } catch {
+      return fallbackRate;
+    }
+  }
+
+  private async resolveBusinessForShopifyRequest(req: any): Promise<{ id: string; shopdomain?: string }> {
+    const explicitBusinessId = req?.headers?.['x-business-id'];
+    if (explicitBusinessId) {
+      const { data: byId } = await supabase
+        .from('business')
+        .select('id, shopdomain')
+        .eq('id', explicitBusinessId)
+        .single();
+      if (byId?.id) return byId;
+    }
+
+    const authHeader = req?.headers?.authorization;
+    const apiKeyHeader = req?.headers?.['x-api-key'];
+    const shopdomainHeader = req?.headers?.shopdomain || req?.body?.shopdomain;
+
+    if (authHeader && String(authHeader).startsWith('Bearer ')) {
+      const token = String(authHeader).replace('Bearer ', '');
+      const { data: byBearer } = await supabase
+        .from('business')
+        .select('id, shopdomain')
+        .eq('api_key', token)
+        .single();
+      if (byBearer?.id) return byBearer;
+    }
+
+    if (apiKeyHeader) {
+      const { data: byApiKey } = await supabase
+        .from('business')
+        .select('id, shopdomain')
+        .eq('api_key', apiKeyHeader)
+        .single();
+      if (byApiKey?.id) return byApiKey;
+    }
+
+    if (shopdomainHeader) {
+      const { data: byShopdomain } = await supabase
+        .from('business')
+        .select('id, shopdomain')
+        .eq('shopdomain', shopdomainHeader)
+        .single();
+      if (byShopdomain?.id) return byShopdomain;
+    }
+
+    throw new BadRequestException('Unable to resolve Shopify business. Provide Authorization Bearer <apiKey>, x-api-key, shopdomain, or x-business-id.');
+  }
 
   // Endpoint to create wallet for a user (called after signup)
   @Post('create')
@@ -761,6 +856,174 @@ export class WalletController {
       .order('created_at', { ascending: false });
     if (error) return { error: error.message };
     return { transactions: data };
+  }
+
+  // Admin endpoint: get current Shopify USD -> NGN conversion rate
+  @Get('admin/shopify-usd-rate')
+  async getShopifyUsdRate(@Req() req) {
+    await this.verifyAdminToken(req);
+
+    const envRate = Number(process.env.SHOPIFY_USD_TO_NGN_RATE || 0);
+    const fallbackRate = Number.isFinite(envRate) && envRate > 0 ? envRate : 1600;
+
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('value, updated_at, updated_by')
+      .eq('key', 'shopify_usd_to_ngn_rate')
+      .single();
+
+    if (error) {
+      return {
+        rate: fallbackRate,
+        source: 'fallback',
+        key: 'shopify_usd_to_ngn_rate',
+      };
+    }
+
+    const parsedRate = Number(data?.value);
+    return {
+      rate: Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : fallbackRate,
+      source: 'database',
+      key: 'shopify_usd_to_ngn_rate',
+      updatedAt: data?.updated_at || null,
+      updatedBy: data?.updated_by || null,
+    };
+  }
+
+  // Admin endpoint: update Shopify USD -> NGN conversion rate
+  @Put('admin/shopify-usd-rate')
+  async updateShopifyUsdRate(@Req() req, @Body() body: { rate: number }) {
+    const admin = await this.verifyAdminToken(req);
+    const rate = Number(body?.rate);
+
+    if (!Number.isFinite(rate) || rate <= 0) {
+      throw new BadRequestException('Invalid rate. Provide a positive numeric value.');
+    }
+
+    const payload = {
+      key: 'shopify_usd_to_ngn_rate',
+      value: String(rate),
+      description: 'Shopify USD to NGN wallet top-up conversion rate',
+      updated_by: String(admin.id),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('system_settings')
+      .upsert([payload], { onConflict: 'key' })
+      .select('key, value, updated_at, updated_by')
+      .single();
+
+    if (error) {
+      throw new HttpException(
+        'Failed to persist Shopify USD rate. Ensure `system_settings` table exists and is accessible.',
+        500,
+      );
+    }
+
+    return {
+      success: true,
+      rate: Number(data?.value || rate),
+      key: data?.key,
+      updatedAt: data?.updated_at,
+      updatedBy: data?.updated_by,
+    };
+  }
+
+  // Shopify endpoint: credit wallet by converting USD charge amount to NGN using admin-configured rate
+  @Post('credit-from-shopify')
+  async creditFromShopify(
+    @Req() req,
+    @Body()
+    body: {
+      shopifyChargeId: string;
+      amountUsd: number;
+      currency?: string;
+      chargeStatus?: string;
+      createdAt?: string;
+      test?: boolean;
+    },
+  ) {
+    const { shopifyChargeId, amountUsd, currency = 'USD', chargeStatus, test } = body;
+
+    if (!shopifyChargeId || typeof shopifyChargeId !== 'string') {
+      throw new BadRequestException('shopifyChargeId is required');
+    }
+
+    const usdAmount = Number(amountUsd);
+    if (!Number.isFinite(usdAmount) || usdAmount <= 0) {
+      throw new BadRequestException('amountUsd must be a positive number');
+    }
+
+    if (String(currency).toUpperCase() !== 'USD') {
+      throw new BadRequestException('Only USD currency is supported for Shopify credit conversion');
+    }
+
+    if (chargeStatus) {
+      const normalizedStatus = String(chargeStatus).toLowerCase();
+      const allowedStatuses = ['active', 'success', 'succeeded', 'paid'];
+      if (!allowedStatuses.includes(normalizedStatus)) {
+        throw new BadRequestException('Shopify charge is not in a payable/active status');
+      }
+    }
+
+    const business = await this.resolveBusinessForShopifyRequest(req);
+    const exchangeRate = await this.getCurrentUsdToNgnRate();
+    const creditedNgn = usdAmount * exchangeRate;
+    const creditedKobo = Math.round(creditedNgn * 100);
+    const reference = `shopify_charge_${String(shopifyChargeId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+    const { data: existingTx } = await supabase
+      .from('wallet_transactions')
+      .select('id, amount, created_at')
+      .eq('business_id', business.id)
+      .eq('reference', reference)
+      .eq('type', 'credit')
+      .eq('status', 'success')
+      .limit(1);
+
+    if (existingTx && existingTx.length > 0) {
+      const { data: currentBusiness } = await supabase
+        .from('business')
+        .select('wallet_balance')
+        .eq('id', business.id)
+        .single();
+
+      return {
+        success: true,
+        balance: Number(currentBusiness?.wallet_balance || 0),
+        currency: 'NGN',
+        credited: Number(existingTx[0].amount || creditedKobo),
+        exchange_rate: exchangeRate,
+        usd_amount: usdAmount,
+        reference,
+        idempotent: true,
+      };
+    }
+
+    const description = `Shopify wallet credit (${test ? 'TEST' : 'LIVE'}): $${usdAmount} × ₦${exchangeRate}/USD`;
+    await this.walletService.creditWallet(business.id, creditedKobo, reference, description);
+
+    const { data: updatedBusiness, error: updatedBusinessError } = await supabase
+      .from('business')
+      .select('wallet_balance')
+      .eq('id', business.id)
+      .single();
+
+    if (updatedBusinessError) {
+      throw new HttpException('Wallet credited but failed to fetch updated balance', 500);
+    }
+
+    return {
+      success: true,
+      balance: Number(updatedBusiness?.wallet_balance || 0),
+      currency: 'NGN',
+      credited: creditedKobo,
+      exchange_rate: exchangeRate,
+      usd_amount: usdAmount,
+      reference,
+      idempotent: false,
+    };
   }
 
   // Admin endpoint to top-up a business wallet
